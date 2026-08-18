@@ -64,6 +64,7 @@ type MapView = {
   createdAt: string;
   updatedAt: string;
 };
+type UndoSnapshot = { viewId: string; view: MapView };
 
 const initialObjects: MapObject[] = [
   ["cognitivism", "Cognitivism", -5.2, 3.1, 2.4, 0.66, "#d98c72", "Classical"],
@@ -284,6 +285,9 @@ function MappingScene({ objects, connections, layers, axisLabels, selectedId, mo
     <PerspectiveCamera makeDefault position={[12, 10, 14]} fov={45} />
     <ambientLight intensity={0.85} /><directionalLight position={[8, 12, 10]} intensity={2.2} color="#fff8e7" /><directionalLight position={[-8, 3, -6]} intensity={0.8} color="#b8d8cb" />
     <gridHelper args={[24, 24, "#446158", "#263b35"]} position={[0, -5.5, 0]} /><axesHelper args={[7]} />
+    <Line points={[[-7, 0, 0], [7, 0, 0]]} color="#e58c7a" lineWidth={1.25} transparent opacity={0.72} />
+    <Line points={[[0, -7, 0], [0, 7, 0]]} color="#8ebc88" lineWidth={1.25} transparent opacity={0.72} />
+    <Line points={[[0, 0, -7], [0, 0, 7]]} color="#7ea9d6" lineWidth={1.25} transparent opacity={0.72} />
     <mesh><sphereGeometry args={[0.13, 24, 24]} /><meshBasicMaterial color="#f0eadc" /></mesh>
     <AxisLabel position={[-7.7, 0, 0]} label={`−X · ${axisLabels.xNegative}`} tone="#e58c7a" editable={editable} onSave={(value) => onAxisSave("xNegative", value.replace(/^−?X\s*·\s*/, ""))} />
     <AxisLabel position={[7.7, 0, 0]} label={`+X · ${axisLabels.xPositive}`} tone="#e58c7a" editable={editable} onSave={(value) => onAxisSave("xPositive", value.replace(/^\+?X\s*·\s*/, ""))} />
@@ -312,6 +316,7 @@ export function CognitiveMap() {
   const [selectedId, setSelectedId] = useState("embodied-placement");
   const [mode, setMode] = useState<TransformMode>("translate");
   const [draggingObject, setDraggingObject] = useState(false);
+  const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
   const [thinkerObjectId, setThinkerObjectId] = useState("");
   const [connectionStartId, setConnectionStartId] = useState("");
   const [pendingConnection, setPendingConnection] = useState<Connection | null>(null);
@@ -332,7 +337,26 @@ export function CognitiveMap() {
   const connections = activeView.connections ?? [];
   const selected = objects.find((object) => object.id === selectedId) ?? null;
   const selectedConnection = connections.find((connection) => connection.id === selectedConnectionId) ?? null;
-  const editView = (change: (view: MapView) => MapView) => setViews((items) => items.map((view) => view.id === activeViewId ? { ...change(view), updatedAt: new Date().toISOString() } : view));
+  const editView = (change: (view: MapView) => MapView) => {
+    if (activeView.readOnly) return;
+    setUndoStack((history) => [...history, { viewId: activeViewId, view: activeView }].slice(-50));
+    setViews((items) => items.map((view) => view.id === activeViewId ? { ...change(view), updatedAt: new Date().toISOString() } : view));
+  };
+  const undo = () => {
+    const snapshot = undoStack.at(-1); if (!snapshot || activeView.readOnly) return;
+    setViews((items) => items.map((view) => view.id === snapshot.viewId ? snapshot.view : view));
+    setUndoStack((history) => history.slice(0, -1));
+    setActiveViewId(snapshot.viewId); setSelectedId("");
+  };
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+      event.preventDefault(); undo();
+    };
+    window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown);
+  });
   const update = (id: string, patch: Partial<MapObject>) => {
     if (activeView.readOnly) return;
     editView((view) => ({ ...view, objects: view.objects.map((item) => item.id === id ? { ...item, ...patch } : item) }));
@@ -478,7 +502,7 @@ export function CognitiveMap() {
 
   return <main className="app-shell">
     <header className="topbar"><div className="brand-block"><span className="brand-mark">ECM</span><div><h1>Embodied Cognitive Mapping</h1><p>Interactive multidimensional mapping of cognitive theories</p></div></div><div className="topbar-actions"><span className={`sync-dot ${syncState}`}>{syncState === "online" ? "Realtime ready" : syncState === "local" ? "Local mode" : syncState}</span><span className="view-name">Room · {roomId}</span><button className="quiet-button" type="button" onClick={() => void copyRoomUrl()}>Copy URL</button><button className="quiet-button" type="button" onClick={joinRoom}>Join</button><button className="quiet-button" type="button" onClick={createRoom}>New room</button></div></header>
-    <nav className="viewbar" aria-label="Researcher views"><span className="eyebrow">Views</span><div className="viewtabs">{views.map((view) => <button key={view.id} className={view.id === activeViewId ? "active" : ""} onClick={() => { setActiveViewId(view.id); setSelectedId(""); }}>{view.name}{view.readOnly && <small> read only</small>}</button>)}<button className="add-view" onClick={newView}>+</button></div><div className="view-actions"><button onClick={renameView} disabled={activeView.readOnly}>Rename</button><button onClick={duplicateView}>Duplicate</button><button onClick={() => void saveViews()}>{saved ? "Saved" : "Save"}</button><button onClick={exportView}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={deleteView}>Delete</button><input ref={importRef} hidden type="file" accept="application/json" onChange={(e) => void importView(e.target.files?.[0])} /></div></nav>
+    <nav className="viewbar" aria-label="Researcher views"><span className="eyebrow">Views</span><div className="viewtabs">{views.map((view) => <button key={view.id} className={view.id === activeViewId ? "active" : ""} onClick={() => { setActiveViewId(view.id); setSelectedId(""); }}>{view.name}{view.readOnly && <small> read only</small>}</button>)}<button className="add-view" onClick={newView}>+</button></div><div className="view-actions"><button onClick={undo} disabled={!undoStack.length || activeView.readOnly} title="Undo (Ctrl+Z)">↶ Undo</button><button onClick={renameView} disabled={activeView.readOnly}>Rename</button><button onClick={duplicateView}>Duplicate</button><button onClick={() => void saveViews()}>{saved ? "Saved" : "Save"}</button><button onClick={exportView}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={deleteView}>Delete</button><input ref={importRef} hidden type="file" accept="application/json" onChange={(e) => void importView(e.target.files?.[0])} /></div></nav>
     <section className="workspace">
       <div className="viewport" aria-label="Interactive three-dimensional concept map">
         <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName} · {collaborators} online</span><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button><button className={mode === "connect" ? "active" : ""} disabled={activeView.readOnly} onClick={() => { setMode("connect"); setConnectionStartId(""); }}>Connect</button></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
