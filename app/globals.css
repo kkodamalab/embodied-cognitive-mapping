@@ -16,6 +16,10 @@ button, input, textarea { font: inherit; }
 .topbar-actions { gap: 10px; }
 .view-name { padding: 9px 12px; color: #c8d1cc; font: 12px var(--font-geist-mono), monospace; }
 .quiet-button { padding: 9px 13px; border: 1px solid #43564f; border-radius: 5px; background: #1a2622; color: #74847d; }
+.sync-dot { color: #8fa29a; font: 9px var(--font-geist-mono), monospace; text-transform: uppercase; white-space: nowrap; }
+.sync-dot::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: #7d8e87; }
+.sync-dot.online::before { background: #6cb88b; box-shadow: 0 0 7px #6cb88b; }
+.sync-dot.error::before { background: #c98074; }
 
 .viewbar { height: 58px; display: flex; align-items: center; gap: 12px; padding: 8px 18px; border-bottom: 1px solid var(--line); background: #151f1c; overflow-x: auto; }
 .viewtabs { display: flex; gap: 5px; flex: 1; }

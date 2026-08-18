@@ -2,8 +2,9 @@
 
 import { Html, OrbitControls, PerspectiveCamera, TransformControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Group } from "three";
+import { supabase } from "../lib/supabase";
 
 type Concept = {
   id: string;
@@ -171,6 +172,8 @@ export function CognitiveMap() {
   const [selectedId, setSelectedId] = useState("embodied-placement");
   const [mode, setMode] = useState<TransformMode>("translate");
   const [saved, setSaved] = useState(false);
+  const [roomId, setRoomId] = useState(() => typeof window === "undefined" ? "demo-room" : window.location.pathname.match(/^\/room\/([^/]+)/)?.[1] ?? "demo-room");
+  const [syncState, setSyncState] = useState<"local" | "loading" | "online" | "error">(supabase ? "loading" : "local");
   const importRef = useRef<HTMLInputElement>(null);
   const activeView = views.find((view) => view.id === activeViewId) ?? views[0];
   const objects = activeView.objects;
@@ -181,10 +184,36 @@ export function CognitiveMap() {
     editView((view) => ({ ...view, objects: view.objects.map((item) => item.id === id ? { ...item, ...patch } : item) }));
   };
 
-  const saveViews = () => {
+  useEffect(() => {
+    if (!supabase) return;
+    let cancelled = false;
+    void supabase.from("ecm_views").select("data").eq("room_id", roomId).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { setSyncState("error"); return; }
+      const remote = (data ?? []).map((row) => row.data as MapView);
+      if (remote.length) { setViews(remote); setActiveViewId(remote[0].id); }
+      setSyncState("online");
+    });
+    return () => { cancelled = true; };
+  }, [roomId]);
+
+  const saveViews = async () => {
     window.localStorage.setItem("ecm-views-v2", JSON.stringify(views));
+    if (supabase) {
+      const rows = views.map((view) => ({ id: view.id, room_id: roomId, name: view.name, owner_name: view.ownerName, read_only: view.readOnly, data: { ...view, roomId }, updated_at: new Date().toISOString() }));
+      const { error } = await supabase.from("ecm_views").upsert(rows);
+      setSyncState(error ? "error" : "online");
+    }
     setSaved(true); window.setTimeout(() => setSaved(false), 1400);
   };
+
+  const openRoom = (nextRoomId: string) => {
+    const clean = nextRoomId.trim().replace(/[^a-zA-Z0-9_-]/g, ""); if (!clean) return;
+    window.history.pushState({}, "", `/room/${clean}`); setRoomId(clean); setActiveViewId("default"); setSelectedId("");
+  };
+  const createRoom = () => openRoom(crypto.randomUUID().slice(0, 12));
+  const joinRoom = () => { const value = window.prompt("Room ID or Room URL"); if (!value) return; openRoom(value.split("/room/").pop() ?? value); };
+  const copyRoomUrl = async () => { const url = `${window.location.origin}/room/${roomId}`; await navigator.clipboard.writeText(url); };
 
   const addObject = () => {
     if (activeView.readOnly) return;
@@ -228,8 +257,8 @@ export function CognitiveMap() {
   };
 
   return <main className="app-shell">
-    <header className="topbar"><div className="brand-block"><span className="brand-mark">ECM</span><div><h1>Embodied Cognitive Mapping</h1><p>Interactive multidimensional mapping of cognitive theories</p></div></div><div className="topbar-actions"><span className="view-name">Room · demo-room</span><button className="quiet-button" type="button">Copy room URL</button></div></header>
-    <nav className="viewbar" aria-label="Researcher views"><span className="eyebrow">Views</span><div className="viewtabs">{views.map((view) => <button key={view.id} className={view.id === activeViewId ? "active" : ""} onClick={() => { setActiveViewId(view.id); setSelectedId(""); }}>{view.name}{view.readOnly && <small> read only</small>}</button>)}<button className="add-view" onClick={newView}>+</button></div><div className="view-actions"><button onClick={renameView} disabled={activeView.readOnly}>Rename</button><button onClick={duplicateView}>Duplicate</button><button onClick={saveViews}>{saved ? "Saved" : "Save"}</button><button onClick={exportView}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={deleteView}>Delete</button><input ref={importRef} hidden type="file" accept="application/json" onChange={(e) => void importView(e.target.files?.[0])} /></div></nav>
+    <header className="topbar"><div className="brand-block"><span className="brand-mark">ECM</span><div><h1>Embodied Cognitive Mapping</h1><p>Interactive multidimensional mapping of cognitive theories</p></div></div><div className="topbar-actions"><span className={`sync-dot ${syncState}`}>{syncState === "online" ? "Realtime ready" : syncState === "local" ? "Local mode" : syncState}</span><span className="view-name">Room · {roomId}</span><button className="quiet-button" type="button" onClick={() => void copyRoomUrl()}>Copy URL</button><button className="quiet-button" type="button" onClick={joinRoom}>Join</button><button className="quiet-button" type="button" onClick={createRoom}>New room</button></div></header>
+    <nav className="viewbar" aria-label="Researcher views"><span className="eyebrow">Views</span><div className="viewtabs">{views.map((view) => <button key={view.id} className={view.id === activeViewId ? "active" : ""} onClick={() => { setActiveViewId(view.id); setSelectedId(""); }}>{view.name}{view.readOnly && <small> read only</small>}</button>)}<button className="add-view" onClick={newView}>+</button></div><div className="view-actions"><button onClick={renameView} disabled={activeView.readOnly}>Rename</button><button onClick={duplicateView}>Duplicate</button><button onClick={() => void saveViews()}>{saved ? "Saved" : "Save"}</button><button onClick={exportView}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={deleteView}>Delete</button><input ref={importRef} hidden type="file" accept="application/json" onChange={(e) => void importView(e.target.files?.[0])} /></div></nav>
     <section className="workspace">
       <div className="viewport" aria-label="Interactive three-dimensional concept map">
         <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName}</span><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
