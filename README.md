@@ -85,6 +85,12 @@ View JSONは `id`, `roomId`, `name`, `ownerName`, `readOnly`, `axisLabels`, `cam
 
 production環境へ `NEXT_PUBLIC_SUPABASE_URL` と `NEXT_PUBLIC_SUPABASE_ANON_KEY` を登録してからdeployしてください。Service Role Keyを登録してはいけません。
 
+### GitHub Pages static demo
+
+`main` へのpushで `.github/workflows/deploy-pages.yml` が静的デモをGitHub Pagesへ公開します。GitHubの **Settings → Pages** でSourceを **GitHub Actions** に設定してください。公開先は `https://kkodamalab.github.io/embodied-cognitive-mapping/` です。
+
+GitHub Pages版はブラウザ内のLocal modeで動作します。Supabaseの環境変数をGitHub Secretsに設定しない限り、Realtime共同編集は有効になりません。
+
 ## Known limitations / TODO
 
 - Compareの重ね合わせ表示とUndo/RedoはVer.2.1予定
