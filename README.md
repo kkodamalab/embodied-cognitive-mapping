@@ -1,91 +1,77 @@
 # Embodied Cognitive Mapping
 
-身体性認知科学の理論・概念を3次元空間に配置し、位置関係を探索・議論するためのWebアプリです。現在は段階開発中で、Phase 1として3Dマッピング空間を実装しています。
+身体性認知科学の理論・概念を3次元空間へ配置し、研究者ごとの見方を作成・比較・共同編集するWebアプリです。
 
-## Current status: Phase 1
+## Implemented
 
-- XYZ軸、グリッド、原点、軸ラベル
-- 10件のサンプル概念を球体とラベルで表示
-- マウスによる回転、ズーム、パン
-- 球体の選択とハイライト、位置情報の表示
-- PCを優先したレスポンシブレイアウト
+- XYZ軸、グリッド、軸ラベル、10件のサンプル概念
+- 回転・ズーム・パン、TransformControlsによる移動と変形
+- XYZ座標、基本サイズ、Scale X/Y/Z、色、透明度、名称、説明、分類の編集
+- object追加・複製・削除・位置リセット
+- 研究者別Viewタブ、New・Rename・Duplicate・Save・Delete・Read only
+- Viewごとの軸ラベル・camera・connections/layers拡張領域
+- JSON Import / Export
+- Room作成・参加・URLコピー
+- Supabase Database永続化、View単位Realtime同期、簡易プレゼンス
+- Supabase未設定時のローカル保存モード
 
 ## Technology
 
-- React 19 / TypeScript
-- vinext / Vite
-- Three.js
-- React Three Fiber / Drei
-- Supabase Database / Realtime（Phase 4–5で導入予定）
+React 19、TypeScript、vinext/Vite、Three.js、React Three Fiber/Drei、Supabase Database/Realtime。
 
-## Requirements
+## Local setup
 
-- Node.js 22.13.0以上
-- pnpm 11以上
-
-## Install and run locally
+Node.js 22.13以上とpnpm 11以上が必要です。
 
 ```bash
 pnpm install
+Copy-Item .env.example .env.local   # Windows PowerShell
 pnpm dev
 ```
 
-表示されたローカルURLをブラウザで開いてください。
+macOS/Linuxでは `cp .env.example .env.local` を使用してください。Supabaseなしでもローカルモードで起動します。
+
+## Supabase setup
+
+1. Supabaseで新規Projectを作成します。
+2. SQL Editorで `supabase/migrations/202608180001_create_ecm_views.sql` を実行します。
+3. Project Settings → APIからProject URLとAnon Keyを取得します。
+4. `.env.local` を設定します。
+
+```dotenv
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_ANON_KEY
+```
+
+Service Role Keyはブラウザや `.env.local` に設定しないでください。`.env*` は `.gitignore` 対象で、`.env.example` のみ追跡されます。
+
+Ver.2はアカウントを持たず、推測困難なRoom URLを共有キーとして使用します。公開運用では、認証と所有者ベースのRLSへ移行してください。
 
 ## Build
 
 ```bash
+pnpm lint
 pnpm build
 ```
 
-## Environment variables and Supabase
+## Rooms and Views
 
-`.env` と `.env.*` はGitの追跡対象外です。クライアントでは公開用のSupabase URLとAnon Keyだけを使用し、Service Role Keyは絶対に設定しません。
+- `New room` でRoom IDを生成し、`Copy URL` で共同研究者へ共有します。
+- 同じ `/room/{roomId}` を開くと同じView一覧を読み込みます。
+- 同じViewを開いた利用者にだけ、そのViewのRealtime変更が反映されます。
+- `Duplicate` で他者Viewを自分の編集可能なViewとして複製できます。
 
-Phase 4では次の雛形を `.env.example` として追加します。
+## View JSON
 
-```dotenv
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-```
-
-RLSを有効にし、Room単位の最小権限ポリシーを設定する予定です。
+View JSONは `id`, `roomId`, `name`, `ownerName`, `readOnly`, `axisLabels`, `camera`, `objects`, `connections`, `layers`, `createdAt`, `updatedAt` を持ちます。各objectは概念情報と、座標・scale・色・opacity等のView表現を保持します。
 
 ## Deployment
 
-Phase 5の共同編集確認後、GitHub連携またはSites / Vercel / Netlify等で公開できる構成にします。環境変数は各ホスティングサービスの設定画面で登録し、GitHubには保存しません。
+production環境へ `NEXT_PUBLIC_SUPABASE_URL` と `NEXT_PUBLIC_SUPABASE_ANON_KEY` を登録してからdeployしてください。Service Role Keyを登録してはいけません。
 
-## Room creation
+## Known limitations / TODO
 
-Room機能はPhase 4で実装予定です。完成後は `/room/{roomId}` を作成し、同じURLを開いた利用者が同じViewを編集できます。
-
-## Planned JSON format
-
-```json
-{
-  "id": "view-id",
-  "name": "Default View",
-  "axisLabels": { "x": "...", "y": "...", "z": "..." },
-  "objects": [],
-  "cameraPosition": [12, 10, 14],
-  "createdAt": "ISO-8601",
-  "updatedAt": "ISO-8601"
-}
-```
-
-各objectは `id`, `name`, `x`, `y`, `z`, `size`, `color`, `description`, `category` を基本フィールドとして持ちます。
-
-## Roadmap
-
-- Phase 2: object選択・直接ドラッグ・編集・追加・複製・削除
-- Phase 3: View保存・読込・JSON import/export・Undo/Redo
-- Phase 4: Supabase、Room、永続化
-- Phase 5: Realtime共同編集と編集プレゼンス
-- Later: theory connections, layers, multimedia, WebXR
-
-## Security
-
-- `.env`、秘密鍵、Service Role Keyをコミットしない
-- ブラウザにはAnon Key以外の権限キーを置かない
-- Supabase導入時はRow Level Securityを有効にする
-- ImportするJSONはスキーマ検証してから利用する
+- Compareの重ね合わせ表示とUndo/RedoはVer.2.1予定
+- camera位置のデータ領域はあるが、現在のカメラ操作結果の自動保存は未実装
+- Ver.2の匿名RLSはRoom URLを知る利用者向け。公開探索や厳密な所有権には認証が必要
+- theory connections、layer表示、multimedia、WebXRは将来拡張
