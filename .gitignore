@@ -1,0 +1,35 @@
+# Dependencies and build output
+node_modules/
+.next/
+.vinext/
+dist/
+out/
+.wrangler/
+
+# Environment and secrets (never commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Supabase local state
+supabase/.branches/
+supabase/.temp/
+
+# Test and tool output
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local work products
+work/
+outputs/
