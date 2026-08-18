@@ -188,7 +188,7 @@ function ObjectMesh({ object, selected, mode, layerOpacity, thinkerOpen, onSelec
   mode: TransformMode;
   layerOpacity: number;
   thinkerOpen: boolean;
-  onSelect: () => void;
+  onSelect: (additive: boolean) => void;
   onOpenThinker: () => void;
   onTransform: (patch: Partial<MapObject>) => void;
   onDragging: (dragging: boolean) => void;
@@ -204,7 +204,7 @@ function ObjectMesh({ object, selected, mode, layerOpacity, thinkerOpen, onSelec
   const moved = useRef(false);
   const beginDrag = (event: ThreeEvent<PointerEvent>) => {
     if (mode !== "translate") return;
-    event.stopPropagation(); onSelect(); moved.current = false; dragging.current = true; onDragging(true);
+    event.stopPropagation(); onSelect(event.nativeEvent.shiftKey || event.nativeEvent.ctrlKey || event.nativeEvent.metaKey); moved.current = false; dragging.current = true; onDragging(true);
     startClientY.current = event.nativeEvent.clientY; startZ.current = object.z;
     const normal = camera.getWorldDirection(new Vector3());
     dragPlane.current.setFromNormalAndCoplanarPoint(normal, new Vector3(object.x, object.y, object.z));
@@ -225,7 +225,7 @@ function ObjectMesh({ object, selected, mode, layerOpacity, thinkerOpen, onSelec
   };
   const body = (
     <group ref={group} position={[object.x, object.y, object.z]} scale={[object.scaleX, object.scaleY, object.scaleZ]}>
-      <mesh onClick={(event) => { event.stopPropagation(); onSelect(); }} onDoubleClick={(event) => { event.stopPropagation(); if (!moved.current && mode !== "connect") onOpenThinker(); moved.current = false; }} onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerOver={() => { if (mode === "translate") document.body.style.cursor = "grab"; }} onPointerOut={() => { if (!dragging.current) document.body.style.cursor = "auto"; }} renderOrder={object.opacity * layerOpacity < 1 ? 2 : 0}>
+      <mesh onClick={(event) => { event.stopPropagation(); onSelect(event.nativeEvent.shiftKey || event.nativeEvent.ctrlKey || event.nativeEvent.metaKey); }} onDoubleClick={(event) => { event.stopPropagation(); if (!moved.current && mode !== "connect") onOpenThinker(); moved.current = false; }} onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerOver={() => { if (mode === "translate") document.body.style.cursor = "grab"; }} onPointerOut={() => { if (!dragging.current) document.body.style.cursor = "auto"; }} renderOrder={object.opacity * layerOpacity < 1 ? 2 : 0}>
         <sphereGeometry args={[object.size, 40, 40]} />
         <meshStandardMaterial
           color={object.color}
@@ -249,8 +249,13 @@ function ObjectMesh({ object, selected, mode, layerOpacity, thinkerOpen, onSelec
   if (!selected || mode === "connect") return body;
   return (
     <TransformControls
+      key={`${object.id}-${mode}`}
       mode={mode === "scale" ? "scale" : "translate"}
-      size={0.72}
+      enabled={mode === "scale" || mode === "translate"}
+      showX showY showZ
+      size={1.25}
+      onMouseDown={() => onDragging(true)}
+      onMouseUp={() => onDragging(false)}
       onObjectChange={() => {
         const node = group.current;
         if (!node) return;
@@ -287,7 +292,7 @@ function MappingScene({ objects, connections, layers, axisLabels, selectedId, mo
   planeView: PlaneView;
   thinkerObjectId: string;
   onSelect: (id: string) => void;
-  onConnectSelect: (id: string) => void;
+  onConnectSelect: (id: string, additive: boolean) => void;
   onOpenThinker: (id: string) => void;
   onSelectConnection: (id: string) => void;
   onChange: (id: string, patch: Partial<MapObject>) => void;
@@ -312,7 +317,7 @@ function MappingScene({ objects, connections, layers, axisLabels, selectedId, mo
     <AxisLabel position={[0, 0, -7.7]} label={`−Z · ${axisLabels.zNegative}`} tone="#7ea9d6" editable={editable} onSave={(value) => onAxisSave("zNegative", value.replace(/^−?Z\s*·\s*/, ""))} />
     <AxisLabel position={[0, 0, 7.7]} label={`+Z · ${axisLabels.zPositive}`} tone="#7ea9d6" editable={editable} onSave={(value) => onAxisSave("zPositive", value.replace(/^\+?Z\s*·\s*/, ""))} />
     {connections.map((connection) => { const source = objects.find((object) => object.id === connection.sourceConceptId); const target = objects.find((object) => object.id === connection.targetConceptId); if (!source || !target || !layers.find((layer) => layer.id === source.layerId)?.visible || !layers.find((layer) => layer.id === target.layerId)?.visible) return null; return <Line key={connection.id} points={[[source.x, source.y, source.z], [target.x, target.y, target.z]]} color={connection.color ?? "#e7d48f"} lineWidth={connection.lineStyle === "dotted" ? 1 : 2} dashed={connection.lineStyle === "dashed" || connection.lineStyle === "dotted"} dashSize={connection.lineStyle === "dotted" ? 0.12 : 0.45} gapSize={connection.lineStyle === "dotted" ? 0.18 : 0.25} transparent opacity={connection.opacity ?? 0.85} onClick={(event) => { event.stopPropagation(); onSelectConnection(connection.id); }} />; })}
-    {objects.map((object) => { const layer = layers.find((item) => item.id === object.layerId); if (layer && !layer.visible) return null; return <ObjectMesh key={object.id} object={object} selected={object.id === selectedId} mode={mode} layerOpacity={layer?.opacity ?? 1} thinkerOpen={thinkerObjectId === object.id} onSelect={() => mode === "connect" ? onConnectSelect(object.id) : onSelect(object.id)} onOpenThinker={() => onOpenThinker(object.id)} onTransform={(patch) => onChange(object.id, patch)} onDragging={onDragging} />; })}
+    {objects.map((object) => { const layer = layers.find((item) => item.id === object.layerId); if (layer && !layer.visible) return null; return <ObjectMesh key={object.id} object={object} selected={object.id === selectedId} mode={mode} layerOpacity={layer?.opacity ?? 1} thinkerOpen={thinkerObjectId === object.id} onSelect={(additive) => mode === "connect" ? onConnectSelect(object.id, additive) : onSelect(object.id)} onOpenThinker={() => onOpenThinker(object.id)} onTransform={(patch) => onChange(object.id, patch)} onDragging={onDragging} />; })}
     <OrbitControls makeDefault enabled={!dragging} enableDamping dampingFactor={0.08} minDistance={7} maxDistance={32} target={[0, 0, 0]} />
   </>;
 }
@@ -382,15 +387,16 @@ export function CognitiveMap() {
     if (activeView.readOnly) return;
     editView((view) => ({ ...view, connections: view.connections.map((connection) => connection.id === id ? { ...connection, ...patch, updatedAt: new Date().toISOString() } : connection) }));
   };
-  const selectForConnection = (id: string) => {
+  const selectForConnection = (id: string, additive = false) => {
     if (activeView.readOnly) return;
     if (!connectionStartId) { setConnectionStartId(id); setSelectedId(id); return; }
-    if (connectionStartId === id) { setConnectionStartId(""); return; }
+    if (connectionStartId === id) { setConnectionStartId(""); setSelectedId(""); return; }
     const source = objects.find((object) => object.id === connectionStartId);
     const target = objects.find((object) => object.id === id);
     const now = new Date().toISOString();
-    setPendingConnection({ id: crypto.randomUUID(), sourceConceptId: connectionStartId, targetConceptId: id, relationType: "similarity", label: `${source?.name ?? "Concept"} ↔ ${target?.name ?? "Concept"}`, description: "", dimensions: [{ id: crypto.randomUUID(), label: defaultDimensions[0], relation: "unknown" }], lineStyle: "solid", color: "#e7d48f", opacity: 0.85, createdAt: now, updatedAt: now });
-    setConnectionStartId(""); setSelectedId("");
+    const connection: Connection = { id: crypto.randomUUID(), sourceConceptId: connectionStartId, targetConceptId: id, relationType: "similarity", label: `${source?.name ?? "Concept"} ↔ ${target?.name ?? "Concept"}`, description: "", dimensions: [{ id: crypto.randomUUID(), label: defaultDimensions[0], relation: "unknown" }], lineStyle: "solid", color: "#e7d48f", opacity: 0.85, createdAt: now, updatedAt: now };
+    editView((view) => ({ ...view, connections: [...view.connections, connection] }));
+    setSelectedConnectionId(connection.id); setPendingConnection(null); setConnectionStartId(additive ? id : ""); setSelectedId(additive ? id : "");
   };
   const savePendingConnection = () => {
     if (!pendingConnection || activeView.readOnly) return;
