@@ -30,6 +30,21 @@ type ViewObject = {
 
 type MapObject = Concept & ViewObject;
 type TransformMode = "translate" | "scale";
+type AxisLabels = { x: string; y: string; z: string };
+type MapView = {
+  id: string;
+  roomId: string;
+  name: string;
+  ownerName: string;
+  readOnly: boolean;
+  axisLabels: AxisLabels;
+  camera: [number, number, number];
+  objects: MapObject[];
+  connections: unknown[];
+  layers: unknown[];
+  createdAt: string;
+  updatedAt: string;
+};
 
 const initialObjects: MapObject[] = [
   ["cognitivism", "Cognitivism", -5.2, 3.1, 2.4, 0.66, "#d98c72", "Classical"],
@@ -54,6 +69,19 @@ const axisLabels = {
   y: "Situated / Sensorimotor  ←  Abstract / Decoupled",
   z: "Individual  ←  Body  ←  Environment  ←  Social / Cultural",
 };
+
+const createView = (id: string, name: string, ownerName: string, offset = 0, readOnly = false): MapView => ({
+  id, roomId: "demo-room", name, ownerName, readOnly, axisLabels: { ...axisLabels }, camera: [12, 10, 14],
+  objects: initialObjects.map((object, index) => ({ ...object, x: object.x + (index % 2 ? offset : -offset), z: object.z + offset * 0.5 })),
+  connections: [], layers: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+});
+
+const starterViews: MapView[] = [
+  createView("default", "Default", "Shared baseline"),
+  createView("kodama", "Kodama", "Kodama", 0.45),
+  createView("ecological", "Ecological", "Researcher A", 0.9, true),
+  createView("enactive", "Enactive", "Researcher B", -0.65, true),
+];
 
 function AxisLabel({ position, label, tone }: { position: [number, number, number]; label: string; tone: string }) {
   return <Html position={position} center distanceFactor={13} style={{ pointerEvents: "none" }}><span className="axis-label" style={{ color: tone }}>{label}</span></Html>;
@@ -106,8 +134,9 @@ function ObjectMesh({ object, selected, mode, onSelect, onTransform }: {
   );
 }
 
-function MappingScene({ objects, selectedId, mode, onSelect, onChange }: {
+function MappingScene({ objects, axisLabels, selectedId, mode, onSelect, onChange }: {
   objects: MapObject[];
+  axisLabels: AxisLabels;
   selectedId: string;
   mode: TransformMode;
   onSelect: (id: string) => void;
@@ -132,37 +161,83 @@ function RangeField({ label, value, min, max, step, onChange }: { label: string;
 }
 
 export function CognitiveMap() {
-  const [objects, setObjects] = useState(initialObjects);
+  const [views, setViews] = useState<MapView[]>(() => {
+    if (typeof window === "undefined") return starterViews;
+    const raw = window.localStorage.getItem("ecm-views-v2");
+    if (!raw) return starterViews;
+    try { const restored = JSON.parse(raw) as MapView[]; return Array.isArray(restored) && restored.length ? restored : starterViews; } catch { return starterViews; }
+  });
+  const [activeViewId, setActiveViewId] = useState("default");
   const [selectedId, setSelectedId] = useState("embodied-placement");
   const [mode, setMode] = useState<TransformMode>("translate");
+  const [saved, setSaved] = useState(false);
+  const importRef = useRef<HTMLInputElement>(null);
+  const activeView = views.find((view) => view.id === activeViewId) ?? views[0];
+  const objects = activeView.objects;
   const selected = objects.find((object) => object.id === selectedId) ?? null;
-  const update = (id: string, patch: Partial<MapObject>) => setObjects((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
+  const editView = (change: (view: MapView) => MapView) => setViews((items) => items.map((view) => view.id === activeViewId ? { ...change(view), updatedAt: new Date().toISOString() } : view));
+  const update = (id: string, patch: Partial<MapObject>) => {
+    if (activeView.readOnly) return;
+    editView((view) => ({ ...view, objects: view.objects.map((item) => item.id === id ? { ...item, ...patch } : item) }));
+  };
+
+  const saveViews = () => {
+    window.localStorage.setItem("ecm-views-v2", JSON.stringify(views));
+    setSaved(true); window.setTimeout(() => setSaved(false), 1400);
+  };
+
   const addObject = () => {
+    if (activeView.readOnly) return;
     const id = crypto.randomUUID();
-    setObjects((items) => [...items, { ...initialObjects[1], id, conceptId: id, name: "New Concept", description: "", x: 0, y: 0, z: 0, color: "#d7b66f" }]);
+    editView((view) => ({ ...view, objects: [...view.objects, { ...initialObjects[1], id, conceptId: id, name: "New Concept", description: "", x: 0, y: 0, z: 0, color: "#d7b66f" }] }));
     setSelectedId(id);
   };
   const duplicate = () => {
-    if (!selected) return;
+    if (!selected || activeView.readOnly) return;
     const id = crypto.randomUUID();
-    setObjects((items) => [...items, { ...selected, id, conceptId: id, name: `${selected.name} copy`, x: selected.x + 0.7, z: selected.z + 0.7 }]);
+    editView((view) => ({ ...view, objects: [...view.objects, { ...selected, id, conceptId: id, name: `${selected.name} copy`, x: selected.x + 0.7, z: selected.z + 0.7 }] }));
     setSelectedId(id);
   };
   const remove = () => {
-    if (!selected || !window.confirm(`Delete “${selected.name}”?`)) return;
-    setObjects((items) => items.filter((item) => item.id !== selected.id)); setSelectedId("");
+    if (!selected || activeView.readOnly || !window.confirm(`Delete “${selected.name}”?`)) return;
+    editView((view) => ({ ...view, objects: view.objects.filter((item) => item.id !== selected.id) })); setSelectedId("");
+  };
+  const newView = () => {
+    const name = window.prompt("New view name", "Untitled View"); if (!name) return;
+    const view = createView(crypto.randomUUID(), name, "You"); setViews((items) => [...items, view]); setActiveViewId(view.id);
+  };
+  const duplicateView = () => {
+    const name = window.prompt("Duplicate view as", `${activeView.name} copy`); if (!name) return;
+    const copy: MapView = { ...activeView, id: crypto.randomUUID(), name, ownerName: "You", readOnly: false, objects: activeView.objects.map((object) => ({ ...object, id: crypto.randomUUID() })), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    setViews((items) => [...items, copy]); setActiveViewId(copy.id);
+  };
+  const renameView = () => {
+    if (activeView.readOnly) return; const name = window.prompt("Rename view", activeView.name); if (name) editView((view) => ({ ...view, name }));
+  };
+  const deleteView = () => {
+    if (views.length === 1 || !window.confirm(`Delete view “${activeView.name}”?`)) return;
+    const remaining = views.filter((view) => view.id !== activeView.id); setViews(remaining); setActiveViewId(remaining[0].id);
+  };
+  const exportView = () => {
+    const blob = new Blob([JSON.stringify(activeView, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob);
+    const link = document.createElement("a"); link.href = url; link.download = `${activeView.name.toLowerCase().replace(/\s+/g, "-")}.json`; link.click(); URL.revokeObjectURL(url);
+  };
+  const importView = async (file?: File) => {
+    if (!file) return;
+    try { const parsed = JSON.parse(await file.text()) as MapView; if (!parsed.name || !Array.isArray(parsed.objects)) throw new Error(); const imported = { ...parsed, id: crypto.randomUUID(), roomId: activeView.roomId, name: `${parsed.name} import`, readOnly: false }; setViews((items) => [...items, imported]); setActiveViewId(imported.id); } catch { window.alert("This file is not a valid ECM View JSON document."); }
   };
 
   return <main className="app-shell">
-    <header className="topbar"><div className="brand-block"><span className="brand-mark">ECM</span><div><h1>Embodied Cognitive Mapping</h1><p>Interactive multidimensional mapping of cognitive theories</p></div></div><div className="topbar-actions"><span className="view-name">Default View</span><button className="quiet-button" type="button" disabled>Share room</button></div></header>
+    <header className="topbar"><div className="brand-block"><span className="brand-mark">ECM</span><div><h1>Embodied Cognitive Mapping</h1><p>Interactive multidimensional mapping of cognitive theories</p></div></div><div className="topbar-actions"><span className="view-name">Room · demo-room</span><button className="quiet-button" type="button">Copy room URL</button></div></header>
+    <nav className="viewbar" aria-label="Researcher views"><span className="eyebrow">Views</span><div className="viewtabs">{views.map((view) => <button key={view.id} className={view.id === activeViewId ? "active" : ""} onClick={() => { setActiveViewId(view.id); setSelectedId(""); }}>{view.name}{view.readOnly && <small> read only</small>}</button>)}<button className="add-view" onClick={newView}>+</button></div><div className="view-actions"><button onClick={renameView} disabled={activeView.readOnly}>Rename</button><button onClick={duplicateView}>Duplicate</button><button onClick={saveViews}>{saved ? "Saved" : "Save"}</button><button onClick={exportView}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={deleteView}>Delete</button><input ref={importRef} hidden type="file" accept="application/json" onChange={(e) => void importView(e.target.files?.[0])} /></div></nav>
     <section className="workspace">
       <div className="viewport" aria-label="Interactive three-dimensional concept map">
-        <div className="viewport-meta"><span className="eyebrow">Conceptual space</span><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button></div><span className="object-count">{objects.length} objects</span></div>
-        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => setSelectedId("")}><MappingScene objects={objects} selectedId={selectedId} mode={mode} onSelect={setSelectedId} onChange={update} /></Canvas>
+        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName}</span><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
+        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => setSelectedId("")}><MappingScene objects={objects} axisLabels={activeView.axisLabels} selectedId={activeView.readOnly ? "" : selectedId} mode={mode} onSelect={setSelectedId} onChange={update} /></Canvas>
         <div className="control-hint"><span><b>Drag space</b> rotate</span><span><b>Drag gizmo</b> {mode}</span><span><b>Scroll</b> zoom</span></div>
       </div>
       <aside className="inspector">
-        <div className="inspector-head"><span className="eyebrow">Object editor</span><span className="phase-badge">Phase 2</span></div>
+        <div className="inspector-head"><span className="eyebrow">Object editor</span><span className="phase-badge">{activeView.readOnly ? "Read only" : "Edit mode"}</span></div>
         {selected ? <>
           <div className="selection-title"><span className="color-chip" style={{ backgroundColor: selected.color }} /><div><input className="title-input" value={selected.name} onChange={(e) => update(selected.id, { name: e.target.value })} /><input className="category-input" value={selected.category} onChange={(e) => update(selected.id, { category: e.target.value })} /></div></div>
           <section className="editor-section"><h3>Position</h3><div className="number-row">{(["x", "y", "z"] as const).map((axis) => <label key={axis}><span>{axis.toUpperCase()}</span><input type="number" step="0.1" value={Number(selected[axis].toFixed(2))} onChange={(e) => update(selected.id, { [axis]: Number(e.target.value) })} /></label>)}</div><button className="text-button" onClick={() => update(selected.id, { x: 0, y: 0, z: 0 })}>Reset position</button></section>
@@ -171,7 +246,8 @@ export function CognitiveMap() {
           <section className="editor-section"><h3>Description</h3><textarea value={selected.description} onChange={(e) => update(selected.id, { description: e.target.value })} rows={3} /></section>
           <div className="object-actions"><button onClick={duplicate}>Duplicate</button><button className="danger" onClick={remove}>Delete</button></div>
         </> : <div className="empty-selection"><span className="empty-orbit" /><h2>No object selected</h2><p>Select a sphere to edit its position and form.</p></div>}
-        <button className="primary-button" onClick={addObject}>+ Add object</button>
+        <section className="editor-section axis-editor"><h3>Axis labels</h3>{(["x", "y", "z"] as const).map((axis) => <label key={axis}><span>{axis.toUpperCase()}</span><input disabled={activeView.readOnly} value={activeView.axisLabels[axis]} onChange={(e) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [axis]: e.target.value } }))} /></label>)}</section>
+        {!activeView.readOnly && <button className="primary-button" onClick={addObject}>+ Add object</button>}
       </aside>
     </section>
   </main>;

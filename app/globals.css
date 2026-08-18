@@ -17,7 +17,18 @@ button, input, textarea { font: inherit; }
 .view-name { padding: 9px 12px; color: #c8d1cc; font: 12px var(--font-geist-mono), monospace; }
 .quiet-button { padding: 9px 13px; border: 1px solid #43564f; border-radius: 5px; background: #1a2622; color: #74847d; }
 
-.workspace { height: calc(100vh - 82px); display: grid; grid-template-columns: minmax(0, 3fr) minmax(288px, 1fr); }
+.viewbar { height: 58px; display: flex; align-items: center; gap: 12px; padding: 8px 18px; border-bottom: 1px solid var(--line); background: #151f1c; overflow-x: auto; }
+.viewtabs { display: flex; gap: 5px; flex: 1; }
+.viewtabs button, .view-actions button { white-space: nowrap; border: 1px solid #354a42; border-radius: 4px; background: #192620; color: #91a39a; cursor: pointer; }
+.viewtabs button { padding: 8px 11px; }
+.viewtabs button.active { border-color: #d1b770; color: #f2e8ca; background: #2c2c21; }
+.viewtabs small { display: block; margin-top: 2px; font-size: 7px; text-transform: uppercase; }
+.viewtabs .add-view { color: #d8bd7b; font-size: 17px; padding: 4px 12px; }
+.view-actions { display: flex; gap: 4px; }
+.view-actions button { padding: 6px 8px; font-size: 9px; }
+.view-actions button:disabled { opacity: .35; cursor: default; }
+.view-actions button.danger { color: #c78f86; }
+.workspace { height: calc(100vh - 140px); display: grid; grid-template-columns: minmax(0, 3fr) minmax(288px, 1fr); }
 .viewport { position: relative; min-width: 0; background: #101916; overflow: hidden; }
 .viewport::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 90px rgba(0,0,0,.35); }
 .viewport-meta { position: absolute; top: 20px; left: 22px; right: 22px; display: flex; justify-content: space-between; z-index: 2; pointer-events: none; }
@@ -75,10 +86,16 @@ button, input, textarea { font: inherit; }
 .object-actions button, .primary-button { padding: 9px; border: 1px solid #43584f; border-radius: 4px; color: #bbc8c2; background: #1b2924; cursor: pointer; }
 .object-actions button.danger { color: #d7a29a; border-color: #65463f; }
 .primary-button { width: 100%; color: #1b241f; border-color: #d5bb77; background: #d5bb77; font-weight: 600; }
+.axis-editor label { display: grid; grid-template-columns: 18px 1fr; align-items: center; gap: 7px; margin: 6px 0; }
+.axis-editor label span { color: #7e9188; font: 9px var(--font-geist-mono), monospace; }
+.axis-editor input { padding: 7px; font-size: 9px; }
+.axis-editor input:disabled { opacity: .55; }
 
 @media (max-width: 900px) {
   body { overflow: auto; }
-  .workspace { height: auto; min-height: calc(100vh - 82px); grid-template-columns: 1fr; grid-template-rows: minmax(570px, 70vh) auto; }
+  .viewbar { height: auto; flex-wrap: wrap; }
+  .view-actions { width: 100%; overflow-x: auto; }
+  .workspace { height: auto; min-height: calc(100vh - 140px); grid-template-columns: 1fr; grid-template-rows: minmax(570px, 70vh) auto; }
   .inspector { border-left: 0; border-top: 1px solid var(--line); }
 }
 @media (max-width: 620px) {
