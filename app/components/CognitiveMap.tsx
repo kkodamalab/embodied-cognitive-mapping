@@ -40,6 +40,7 @@ type ViewObject = {
 
 type MapObject = Concept & ViewObject;
 type TransformMode = "translate" | "scale" | "connect";
+type PlaneView = "3d" | "xy" | "yz" | "xz";
 type AxisLabels = {
   xNegative: string; xPositive: string;
   yNegative: string; yPositive: string;
@@ -262,13 +263,28 @@ function ObjectMesh({ object, selected, mode, layerOpacity, thinkerOpen, onSelec
   );
 }
 
-function MappingScene({ objects, connections, layers, axisLabels, selectedId, mode, thinkerObjectId, onSelect, onConnectSelect, onOpenThinker, onSelectConnection, onChange, onDragging, dragging, editable, onAxisSave }: {
+function CameraPreset({ view }: { view: PlaneView }) {
+  const camera = useThree((state) => state.camera);
+  useEffect(() => {
+    const preset: Record<PlaneView, { position: [number, number, number]; up: [number, number, number] }> = {
+      "3d": { position: [12, 10, 14], up: [0, 1, 0] },
+      xy: { position: [0, 0, 22], up: [0, 1, 0] },
+      yz: { position: [22, 0, 0], up: [0, 1, 0] },
+      xz: { position: [0, 22, 0], up: [0, 0, -1] },
+    };
+    camera.position.set(...preset[view].position); camera.up.set(...preset[view].up); camera.lookAt(0, 0, 0); camera.updateProjectionMatrix();
+  }, [camera, view]);
+  return null;
+}
+
+function MappingScene({ objects, connections, layers, axisLabels, selectedId, mode, planeView, thinkerObjectId, onSelect, onConnectSelect, onOpenThinker, onSelectConnection, onChange, onDragging, dragging, editable, onAxisSave }: {
   objects: MapObject[];
   connections: Connection[];
   layers: LayerDefinition[];
   axisLabels: AxisLabels;
   selectedId: string;
   mode: TransformMode;
+  planeView: PlaneView;
   thinkerObjectId: string;
   onSelect: (id: string) => void;
   onConnectSelect: (id: string) => void;
@@ -282,7 +298,7 @@ function MappingScene({ objects, connections, layers, axisLabels, selectedId, mo
 }) {
   return <>
     <color attach="background" args={["#101916"]} /><fog attach="fog" args={["#101916", 18, 36]} />
-    <PerspectiveCamera makeDefault position={[12, 10, 14]} fov={45} />
+    <PerspectiveCamera makeDefault position={[12, 10, 14]} fov={45} /><CameraPreset view={planeView} />
     <ambientLight intensity={0.85} /><directionalLight position={[8, 12, 10]} intensity={2.2} color="#fff8e7" /><directionalLight position={[-8, 3, -6]} intensity={0.8} color="#b8d8cb" />
     <gridHelper args={[24, 24, "#446158", "#263b35"]} position={[0, -5.5, 0]} /><axesHelper args={[7]} />
     <Line points={[[-7, 0, 0], [7, 0, 0]]} color="#e58c7a" lineWidth={1.25} transparent opacity={0.72} />
@@ -315,6 +331,7 @@ export function CognitiveMap() {
   const [activeViewId, setActiveViewId] = useState("default");
   const [selectedId, setSelectedId] = useState("embodied-placement");
   const [mode, setMode] = useState<TransformMode>("translate");
+  const [planeView, setPlaneView] = useState<PlaneView>("3d");
   const [draggingObject, setDraggingObject] = useState(false);
   const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
   const [thinkerObjectId, setThinkerObjectId] = useState("");
@@ -505,8 +522,8 @@ export function CognitiveMap() {
     <nav className="viewbar" aria-label="Researcher views"><span className="eyebrow">Views</span><div className="viewtabs">{views.map((view) => <button key={view.id} className={view.id === activeViewId ? "active" : ""} onClick={() => { setActiveViewId(view.id); setSelectedId(""); }}>{view.name}{view.readOnly && <small> read only</small>}</button>)}<button className="add-view" onClick={newView}>+</button></div><div className="view-actions"><button onClick={undo} disabled={!undoStack.length || activeView.readOnly} title="Undo (Ctrl+Z)">↶ Undo</button><button onClick={renameView} disabled={activeView.readOnly}>Rename</button><button onClick={duplicateView}>Duplicate</button><button onClick={() => void saveViews()}>{saved ? "Saved" : "Save"}</button><button onClick={exportView}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={deleteView}>Delete</button><input ref={importRef} hidden type="file" accept="application/json" onChange={(e) => void importView(e.target.files?.[0])} /></div></nav>
     <section className="workspace">
       <div className="viewport" aria-label="Interactive three-dimensional concept map">
-        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName} · {collaborators} online</span><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button><button className={mode === "connect" ? "active" : ""} disabled={activeView.readOnly} onClick={() => { setMode("connect"); setConnectionStartId(""); }}>Connect</button></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
-        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => { setSelectedId(""); if (mode === "connect") setConnectionStartId(""); }}><MappingScene objects={objects} connections={connections} layers={layers} axisLabels={activeView.axisLabels} selectedId={activeView.readOnly ? "" : selectedId} mode={mode} thinkerObjectId={thinkerObjectId} onSelect={setSelectedId} onConnectSelect={selectForConnection} onOpenThinker={(id) => setThinkerObjectId((current) => current === id ? "" : id)} onSelectConnection={(id) => { setSelectedConnectionId(id); setPendingConnection(null); }} onChange={update} onDragging={setDraggingObject} dragging={draggingObject} editable={!activeView.readOnly} onAxisSave={(axis, value) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [axis]: value } }))} /></Canvas>
+        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName} · {collaborators} online</span><div className="viewport-tools"><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button><button className={mode === "connect" ? "active" : ""} disabled={activeView.readOnly} onClick={() => { setMode("connect"); setConnectionStartId(""); }}>Connect</button></div><div className="tool-toggle plane-toggle" aria-label="Camera view"><button className={planeView === "3d" ? "active" : ""} onClick={() => setPlaneView("3d")}>3D</button><button className={planeView === "xy" ? "active" : ""} onClick={() => setPlaneView("xy")}>XY</button><button className={planeView === "yz" ? "active" : ""} onClick={() => setPlaneView("yz")}>YZ</button><button className={planeView === "xz" ? "active" : ""} onClick={() => setPlaneView("xz")}>XZ</button></div></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
+        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => { setSelectedId(""); if (mode === "connect") setConnectionStartId(""); }}><MappingScene objects={objects} connections={connections} layers={layers} axisLabels={activeView.axisLabels} selectedId={activeView.readOnly ? "" : selectedId} mode={mode} planeView={planeView} thinkerObjectId={thinkerObjectId} onSelect={setSelectedId} onConnectSelect={selectForConnection} onOpenThinker={(id) => setThinkerObjectId((current) => current === id ? "" : id)} onSelectConnection={(id) => { setSelectedConnectionId(id); setPendingConnection(null); }} onChange={update} onDragging={setDraggingObject} dragging={draggingObject} editable={!activeView.readOnly} onAxisSave={(axis, value) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [axis]: value } }))} /></Canvas>
         <div className="layer-panel"><div><b>Layers</b><button disabled={activeView.readOnly} onClick={addLayer}>+ Add</button></div>{[...layers].sort((a, b) => a.order - b.order).map((layer) => <details key={layer.id}><summary><input type="checkbox" checked={layer.visible} disabled={activeView.readOnly} onChange={(e) => updateLayer(layer.id, { visible: e.target.checked })} onClick={(e) => e.stopPropagation()} /> {layer.name}</summary><label>Name<input disabled={activeView.readOnly} value={layer.name} onChange={(e) => updateLayer(layer.id, { name: e.target.value })} /></label><label>Description<input disabled={activeView.readOnly} value={layer.description ?? ""} onChange={(e) => updateLayer(layer.id, { description: e.target.value })} /></label><label>Opacity <input type="range" min="0.05" max="1" step="0.05" disabled={activeView.readOnly} value={layer.opacity ?? 1} onChange={(e) => updateLayer(layer.id, { opacity: Number(e.target.value) })} /></label><button disabled={activeView.readOnly || layers.length < 2} className="danger" onClick={() => removeLayer(layer.id)}>Delete layer</button></details>)}</div>
         <div className="control-hint">{mode === "connect" ? <span><b>Connect:</b> {connectionStartId ? "choose a second sphere" : "choose two spheres"}</span> : <><span><b>Drag sphere</b> screen plane</span><span><b>Shift + drag</b> depth (Z)</span><span><b>Drag space</b> rotate</span></>}</div>
       </div>
