@@ -174,6 +174,9 @@ export function CognitiveMap() {
   const [saved, setSaved] = useState(false);
   const [roomId, setRoomId] = useState(() => typeof window === "undefined" ? "demo-room" : window.location.pathname.match(/^\/room\/([^/]+)/)?.[1] ?? "demo-room");
   const [syncState, setSyncState] = useState<"local" | "loading" | "online" | "error">(supabase ? "loading" : "local");
+  const [collaborators, setCollaborators] = useState(1);
+  const applyingRemote = useRef(false);
+  const presenceKey = useRef(`guest-${crypto.randomUUID().slice(0, 8)}`);
   const importRef = useRef<HTMLInputElement>(null);
   const activeView = views.find((view) => view.id === activeViewId) ?? views[0];
   const objects = activeView.objects;
@@ -196,6 +199,38 @@ export function CognitiveMap() {
     });
     return () => { cancelled = true; };
   }, [roomId]);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const client = supabase;
+    const channel = client.channel(`ecm:${roomId}:${activeViewId}`, { config: { presence: { key: presenceKey.current } } })
+      .on("postgres_changes", { event: "*", schema: "public", table: "ecm_views", filter: `room_id=eq.${roomId}` }, (payload) => {
+        const record = payload.new as { data?: MapView };
+        const remote = record.data;
+        if (!remote || remote.id !== activeViewId) return;
+        applyingRemote.current = true;
+        setViews((items) => items.map((view) => view.id === remote.id ? remote : view));
+      })
+      .on("presence", { event: "sync" }, () => {
+        setCollaborators(Object.keys(channel.presenceState()).length || 1);
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          setSyncState("online");
+          void channel.track({ viewId: activeViewId, editingObjectId: selectedId || null, onlineAt: new Date().toISOString() });
+        }
+      });
+    return () => { void client.removeChannel(channel); };
+  }, [activeViewId, roomId, selectedId]);
+
+  useEffect(() => {
+    if (!supabase || syncState !== "online" || activeView.readOnly) return;
+    if (applyingRemote.current) { applyingRemote.current = false; return; }
+    const timer = window.setTimeout(() => {
+      void supabase.from("ecm_views").upsert({ id: activeView.id, room_id: roomId, name: activeView.name, owner_name: activeView.ownerName, read_only: activeView.readOnly, data: { ...activeView, roomId }, updated_at: new Date().toISOString() }).then(({ error }) => setSyncState(error ? "error" : "online"));
+    }, 420);
+    return () => window.clearTimeout(timer);
+  }, [activeView, roomId, syncState]);
 
   const saveViews = async () => {
     window.localStorage.setItem("ecm-views-v2", JSON.stringify(views));
@@ -261,7 +296,7 @@ export function CognitiveMap() {
     <nav className="viewbar" aria-label="Researcher views"><span className="eyebrow">Views</span><div className="viewtabs">{views.map((view) => <button key={view.id} className={view.id === activeViewId ? "active" : ""} onClick={() => { setActiveViewId(view.id); setSelectedId(""); }}>{view.name}{view.readOnly && <small> read only</small>}</button>)}<button className="add-view" onClick={newView}>+</button></div><div className="view-actions"><button onClick={renameView} disabled={activeView.readOnly}>Rename</button><button onClick={duplicateView}>Duplicate</button><button onClick={() => void saveViews()}>{saved ? "Saved" : "Save"}</button><button onClick={exportView}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={deleteView}>Delete</button><input ref={importRef} hidden type="file" accept="application/json" onChange={(e) => void importView(e.target.files?.[0])} /></div></nav>
     <section className="workspace">
       <div className="viewport" aria-label="Interactive three-dimensional concept map">
-        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName}</span><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
+        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName} · {collaborators} online</span><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
         <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => setSelectedId("")}><MappingScene objects={objects} axisLabels={activeView.axisLabels} selectedId={activeView.readOnly ? "" : selectedId} mode={mode} onSelect={setSelectedId} onChange={update} /></Canvas>
         <div className="control-hint"><span><b>Drag space</b> rotate</span><span><b>Drag gizmo</b> {mode}</span><span><b>Scroll</b> zoom</span></div>
       </div>
