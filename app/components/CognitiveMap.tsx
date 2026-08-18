@@ -1,6 +1,6 @@
 "use client";
 
-import { Html, OrbitControls, PerspectiveCamera, TransformControls } from "@react-three/drei";
+import { Html, Line, OrbitControls, PerspectiveCamera, TransformControls } from "@react-three/drei";
 import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
 import { Plane, Vector3, type Group } from "three";
@@ -12,7 +12,12 @@ type Concept = {
   description: string;
   category: string;
   references: string[];
+  thinkers?: Thinker[];
 };
+type Thinker = { id: string; name: string; years?: string; imageUrl?: string; imageCredit?: string; coreMessage: string; role?: string; references?: string[] };
+type ComparisonDimension = { id: string; label: string; sourceValue?: string; targetValue?: string; relation?: "same" | "similar" | "different" | "debated" | "unknown"; note?: string };
+type Connection = { id: string; sourceConceptId: string; targetConceptId: string; relationType: "similarity" | "difference" | "influence" | "criticism" | "historical" | "compatibility" | "other"; label: string; description?: string; dimensions: ComparisonDimension[]; lineStyle?: "solid" | "dashed" | "dotted"; color?: string; opacity?: number; createdAt: string; updatedAt: string };
+type LayerDefinition = { id: string; name: string; description?: string; visible: boolean; opacity?: number; order: number };
 
 type ViewObject = {
   id: string;
@@ -30,10 +35,11 @@ type ViewObject = {
   categoryId?: string;
   colorId?: string;
   customColor?: string;
+  layerId?: string;
 };
 
 type MapObject = Concept & ViewObject;
-type TransformMode = "translate" | "scale";
+type TransformMode = "translate" | "scale" | "connect";
 type AxisLabels = {
   xNegative: string; xPositive: string;
   yNegative: string; yPositive: string;
@@ -51,8 +57,8 @@ type MapView = {
   axisLabels: AxisLabels;
   camera: [number, number, number];
   objects: MapObject[];
-  connections: unknown[];
-  layers: unknown[];
+  connections: Connection[];
+  layers: LayerDefinition[];
   palette: PaletteColor[];
   categories: CategoryDefinition[];
   createdAt: string;
@@ -120,11 +126,30 @@ const defaultCategories: CategoryDefinition[] = [
   { id: "computational", name: "Predictive / Computational", defaultColorId: "pink" },
   { id: "other", name: "Other", defaultColorId: "gray" },
 ];
+const defaultLayers: LayerDefinition[] = [
+  { id: "theories", name: "Cognitive theories / approaches", description: "Conceptual and empirical approaches", visible: true, opacity: 1, order: 1 },
+  { id: "formal", name: "Formal / computational frameworks", description: "Formal and computational frameworks", visible: true, opacity: 0.7, order: 2 },
+  { id: "meta", name: "Mathematical / meta-theoretical frameworks", description: "Future mathematical and meta-theoretical approaches", visible: true, opacity: 0.45, order: 3 },
+];
+const thinkerSamples: Record<string, Thinker[]> = {
+  cognitivism: [{ id: "newell", name: "Allen Newell", years: "1927–1992", role: "Representative cognitive scientist", coreMessage: "Demo core message — replace with reviewed academic content.", references: ["Newell & Simon, Human Problem Solving (1972)"] }],
+  embodied: [{ id: "varela", name: "Francisco J. Varela", years: "1946–2001", role: "Cognitive scientist", coreMessage: "Demo core message — replace with reviewed academic content.", references: ["Varela, Thompson & Rosch, The Embodied Mind (1991)"] }],
+  extended: [{ id: "clark", name: "Andy Clark", years: "1957–", role: "Philosopher of mind", coreMessage: "Demo core message — replace with reviewed academic content.", references: ["Clark & Chalmers, The Extended Mind (1998)"] }],
+  enactivism: [{ id: "thompson", name: "Evan Thompson", years: "1962–", role: "Philosopher and cognitive scientist", coreMessage: "Demo core message — replace with reviewed academic content.", references: ["Thompson, Mind in Life (2007)"] }],
+  ecological: [{ id: "gibson", name: "James J. Gibson", years: "1904–1979", role: "Psychologist", coreMessage: "Demo core message — replace with reviewed academic content.", references: ["Gibson, The Ecological Approach to Visual Perception (1979)"] }],
+};
+const defaultDimensions = ["Representation", "Computation", "Embodiment", "Environment", "Agent–environment coupling", "Direct perception", "Autopoiesis", "Predictive / generative model", "Social / cultural dimension"];
+const normalizeView = (view: MapView): MapView => ({
+  ...normalizeViewAxisLabels(view),
+  layers: Array.isArray(view.layers) && view.layers.length ? view.layers : defaultLayers.map((layer) => ({ ...layer })),
+  connections: Array.isArray(view.connections) ? view.connections : [],
+  objects: view.objects.map((object) => ({ ...object, layerId: object.layerId ?? (object.categoryId === "computational" ? "formal" : "theories"), thinkers: object.thinkers ?? thinkerSamples[object.conceptId] })),
+});
 
 const createView = (id: string, name: string, ownerName: string, offset = 0, readOnly = false): MapView => ({
   id, roomId: "demo-room", name, ownerName, readOnly, axisLabels: { ...axisLabels }, camera: [12, 10, 14],
-  objects: initialObjects.map((object, index) => ({ ...object, x: object.x + (index % 2 ? offset : -offset), z: object.z + offset * 0.5 })),
-  connections: [], layers: [], palette: defaultPalette, categories: defaultCategories, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  objects: initialObjects.map((object, index) => ({ ...object, x: object.x + (index % 2 ? offset : -offset), z: object.z + offset * 0.5, layerId: object.categoryId === "computational" ? "formal" : "theories", thinkers: thinkerSamples[object.conceptId] })),
+  connections: [], layers: defaultLayers.map((layer) => ({ ...layer })), palette: defaultPalette, categories: defaultCategories, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
 });
 
 const starterViews: MapView[] = [
@@ -146,11 +171,23 @@ function AxisLabel({ position, label, tone, editable, onSave }: { position: [num
   </Html>;
 }
 
-function ObjectMesh({ object, selected, mode, onSelect, onTransform, onDragging }: {
+function ThinkerCard({ concept, onClose }: { concept: MapObject; onClose: () => void }) {
+  const [index, setIndex] = useState(0);
+  const [more, setMore] = useState(false);
+  const thinkers = concept.thinkers ?? [];
+  const thinker = thinkers[index];
+  if (!thinker) return <Html position={[0, concept.size + 1.2, 0]} center distanceFactor={10}><div className="thinker-card"><strong>{concept.name}</strong><p>Thinker information has not been added yet.</p><button onClick={onClose}>Close</button></div></Html>;
+  return <Html position={[0, concept.size + 1.4, 0]} center distanceFactor={10} style={{ pointerEvents: "auto" }}><article className="thinker-card"><button className="card-close" onClick={onClose}>×</button><small>{concept.name}</small><div className="thinker-head">{thinker.imageUrl ? <img src={thinker.imageUrl} alt={thinker.name} /> : <span className="thinker-placeholder">{thinker.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}<div><strong>{thinker.name}</strong><span>{thinker.years}</span><em>{thinker.role}</em></div></div><h4>Core Message</h4><p>{more ? thinker.coreMessage : thinker.coreMessage.slice(0, 180)}</p>{thinker.references?.length ? <><h4>Key references</h4><ul>{thinker.references.slice(0, 3).map((reference) => <li key={reference}>{reference}</li>)}</ul></> : null}<div className="card-actions"><button disabled={thinkers.length < 2} onClick={() => setIndex((value) => (value - 1 + thinkers.length) % thinkers.length)}>‹</button><button disabled={thinkers.length < 2} onClick={() => setIndex((value) => (value + 1) % thinkers.length)}>›</button><button onClick={() => setMore((value) => !value)}>{more ? "Less" : "More"}</button><button onClick={onClose}>Close</button></div></article></Html>;
+}
+
+function ObjectMesh({ object, selected, mode, layerOpacity, thinkerOpen, onSelect, onOpenThinker, onTransform, onDragging }: {
   object: MapObject;
   selected: boolean;
   mode: TransformMode;
+  layerOpacity: number;
+  thinkerOpen: boolean;
   onSelect: () => void;
+  onOpenThinker: () => void;
   onTransform: (patch: Partial<MapObject>) => void;
   onDragging: (dragging: boolean) => void;
 }) {
@@ -162,9 +199,10 @@ function ObjectMesh({ object, selected, mode, onSelect, onTransform, onDragging 
   const dragPoint = useRef(new Vector3());
   const startClientY = useRef(0);
   const startZ = useRef(0);
+  const moved = useRef(false);
   const beginDrag = (event: ThreeEvent<PointerEvent>) => {
     if (mode !== "translate") return;
-    event.stopPropagation(); onSelect(); dragging.current = true; onDragging(true);
+    event.stopPropagation(); onSelect(); moved.current = false; dragging.current = true; onDragging(true);
     startClientY.current = event.nativeEvent.clientY; startZ.current = object.z;
     const normal = camera.getWorldDirection(new Vector3());
     dragPlane.current.setFromNormalAndCoplanarPoint(normal, new Vector3(object.x, object.y, object.z));
@@ -174,7 +212,7 @@ function ObjectMesh({ object, selected, mode, onSelect, onTransform, onDragging 
   };
   const moveDrag = (event: ThreeEvent<PointerEvent>) => {
     if (!dragging.current) return;
-    event.stopPropagation();
+    event.stopPropagation(); moved.current = true;
     if (event.nativeEvent.shiftKey) onTransform({ z: startZ.current + (startClientY.current - event.nativeEvent.clientY) * 0.025 });
     else if (event.ray.intersectPlane(dragPlane.current, dragPoint.current)) onTransform({ x: dragPoint.current.x - dragOffset.current.x, y: dragPoint.current.y - dragOffset.current.y, z: dragPoint.current.z - dragOffset.current.z });
   };
@@ -185,7 +223,7 @@ function ObjectMesh({ object, selected, mode, onSelect, onTransform, onDragging 
   };
   const body = (
     <group ref={group} position={[object.x, object.y, object.z]} scale={[object.scaleX, object.scaleY, object.scaleZ]}>
-      <mesh onClick={(event) => { event.stopPropagation(); onSelect(); }} onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerOver={() => { if (mode === "translate") document.body.style.cursor = "grab"; }} onPointerOut={() => { if (!dragging.current) document.body.style.cursor = "auto"; }} renderOrder={object.opacity < 1 ? 2 : 0}>
+      <mesh onClick={(event) => { event.stopPropagation(); onSelect(); }} onDoubleClick={(event) => { event.stopPropagation(); if (!moved.current && mode !== "connect") onOpenThinker(); moved.current = false; }} onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerOver={() => { if (mode === "translate") document.body.style.cursor = "grab"; }} onPointerOut={() => { if (!dragging.current) document.body.style.cursor = "auto"; }} renderOrder={object.opacity * layerOpacity < 1 ? 2 : 0}>
         <sphereGeometry args={[object.size, 40, 40]} />
         <meshStandardMaterial
           color={object.color}
@@ -193,22 +231,23 @@ function ObjectMesh({ object, selected, mode, onSelect, onTransform, onDragging 
           emissiveIntensity={selected ? 0.38 : 0}
           roughness={0.42}
           metalness={0.08}
-          transparent={object.opacity < 1}
-          opacity={object.opacity}
-          depthWrite={object.opacity >= 0.92}
+          transparent={object.opacity * layerOpacity < 1}
+          opacity={object.opacity * layerOpacity}
+          depthWrite={object.opacity * layerOpacity >= 0.92}
         />
       </mesh>
       {selected && <mesh scale={1.07}><sphereGeometry args={[object.size, 28, 28]} /><meshBasicMaterial color="#fff4d0" wireframe transparent opacity={0.72} /></mesh>}
       <Html position={[0, object.size + 0.35, 0]} center distanceFactor={12} style={{ pointerEvents: "none" }}>
         <span className={`concept-label${selected ? " selected" : ""}`}>{object.name}</span>
       </Html>
+      {thinkerOpen && <ThinkerCard concept={object} onClose={onOpenThinker} />}
     </group>
   );
 
-  if (!selected) return body;
+  if (!selected || mode === "connect") return body;
   return (
     <TransformControls
-      mode={mode}
+      mode={mode === "scale" ? "scale" : "translate"}
       size={0.72}
       onObjectChange={() => {
         const node = group.current;
@@ -222,12 +261,18 @@ function ObjectMesh({ object, selected, mode, onSelect, onTransform, onDragging 
   );
 }
 
-function MappingScene({ objects, axisLabels, selectedId, mode, onSelect, onChange, onDragging, dragging, editable, onAxisSave }: {
+function MappingScene({ objects, connections, layers, axisLabels, selectedId, mode, thinkerObjectId, onSelect, onConnectSelect, onOpenThinker, onSelectConnection, onChange, onDragging, dragging, editable, onAxisSave }: {
   objects: MapObject[];
+  connections: Connection[];
+  layers: LayerDefinition[];
   axisLabels: AxisLabels;
   selectedId: string;
   mode: TransformMode;
+  thinkerObjectId: string;
   onSelect: (id: string) => void;
+  onConnectSelect: (id: string) => void;
+  onOpenThinker: (id: string) => void;
+  onSelectConnection: (id: string) => void;
   onChange: (id: string, patch: Partial<MapObject>) => void;
   onDragging: (dragging: boolean) => void;
   dragging: boolean;
@@ -246,7 +291,8 @@ function MappingScene({ objects, axisLabels, selectedId, mode, onSelect, onChang
     <AxisLabel position={[0, 7.7, 0]} label={`+Y · ${axisLabels.yPositive}`} tone="#8ebc88" editable={editable} onSave={(value) => onAxisSave("yPositive", value.replace(/^\+?Y\s*·\s*/, ""))} />
     <AxisLabel position={[0, 0, -7.7]} label={`−Z · ${axisLabels.zNegative}`} tone="#7ea9d6" editable={editable} onSave={(value) => onAxisSave("zNegative", value.replace(/^−?Z\s*·\s*/, ""))} />
     <AxisLabel position={[0, 0, 7.7]} label={`+Z · ${axisLabels.zPositive}`} tone="#7ea9d6" editable={editable} onSave={(value) => onAxisSave("zPositive", value.replace(/^\+?Z\s*·\s*/, ""))} />
-    {objects.map((object) => <ObjectMesh key={object.id} object={object} selected={object.id === selectedId} mode={mode} onSelect={() => onSelect(object.id)} onTransform={(patch) => onChange(object.id, patch)} onDragging={onDragging} />)}
+    {connections.map((connection) => { const source = objects.find((object) => object.id === connection.sourceConceptId); const target = objects.find((object) => object.id === connection.targetConceptId); if (!source || !target || !layers.find((layer) => layer.id === source.layerId)?.visible || !layers.find((layer) => layer.id === target.layerId)?.visible) return null; return <Line key={connection.id} points={[[source.x, source.y, source.z], [target.x, target.y, target.z]]} color={connection.color ?? "#e7d48f"} lineWidth={connection.lineStyle === "dotted" ? 1 : 2} dashed={connection.lineStyle === "dashed" || connection.lineStyle === "dotted"} dashSize={connection.lineStyle === "dotted" ? 0.12 : 0.45} gapSize={connection.lineStyle === "dotted" ? 0.18 : 0.25} transparent opacity={connection.opacity ?? 0.85} onClick={(event) => { event.stopPropagation(); onSelectConnection(connection.id); }} />; })}
+    {objects.map((object) => { const layer = layers.find((item) => item.id === object.layerId); if (layer && !layer.visible) return null; return <ObjectMesh key={object.id} object={object} selected={object.id === selectedId} mode={mode} layerOpacity={layer?.opacity ?? 1} thinkerOpen={thinkerObjectId === object.id} onSelect={() => mode === "connect" ? onConnectSelect(object.id) : onSelect(object.id)} onOpenThinker={() => onOpenThinker(object.id)} onTransform={(patch) => onChange(object.id, patch)} onDragging={onDragging} />; })}
     <OrbitControls makeDefault enabled={!dragging} enableDamping dampingFactor={0.08} minDistance={7} maxDistance={32} target={[0, 0, 0]} />
   </>;
 }
@@ -260,12 +306,16 @@ export function CognitiveMap() {
     if (typeof window === "undefined") return starterViews;
     const raw = window.localStorage.getItem("ecm-views-v2");
     if (!raw) return starterViews;
-    try { const restored = JSON.parse(raw) as MapView[]; return Array.isArray(restored) && restored.length ? restored.map(normalizeViewAxisLabels) : starterViews; } catch { return starterViews; }
+    try { const restored = JSON.parse(raw) as MapView[]; return Array.isArray(restored) && restored.length ? restored.map(normalizeView) : starterViews; } catch { return starterViews; }
   });
   const [activeViewId, setActiveViewId] = useState("default");
   const [selectedId, setSelectedId] = useState("embodied-placement");
   const [mode, setMode] = useState<TransformMode>("translate");
   const [draggingObject, setDraggingObject] = useState(false);
+  const [thinkerObjectId, setThinkerObjectId] = useState("");
+  const [connectionStartId, setConnectionStartId] = useState("");
+  const [pendingConnection, setPendingConnection] = useState<Connection | null>(null);
+  const [selectedConnectionId, setSelectedConnectionId] = useState("");
   const [showCustomColor, setShowCustomColor] = useState(false);
   const [saved, setSaved] = useState(false);
   const [roomId, setRoomId] = useState(() => typeof window === "undefined" ? "demo-room" : window.location.pathname.match(/^\/room\/([^/]+)/)?.[1] ?? "demo-room");
@@ -278,11 +328,47 @@ export function CognitiveMap() {
   const palette = activeView.palette ?? defaultPalette;
   const categories = activeView.categories ?? defaultCategories;
   const objects = activeView.objects;
+  const layers = activeView.layers ?? defaultLayers;
+  const connections = activeView.connections ?? [];
   const selected = objects.find((object) => object.id === selectedId) ?? null;
+  const selectedConnection = connections.find((connection) => connection.id === selectedConnectionId) ?? null;
   const editView = (change: (view: MapView) => MapView) => setViews((items) => items.map((view) => view.id === activeViewId ? { ...change(view), updatedAt: new Date().toISOString() } : view));
   const update = (id: string, patch: Partial<MapObject>) => {
     if (activeView.readOnly) return;
     editView((view) => ({ ...view, objects: view.objects.map((item) => item.id === id ? { ...item, ...patch } : item) }));
+  };
+  const updateConnection = (id: string, patch: Partial<Connection>) => {
+    if (activeView.readOnly) return;
+    editView((view) => ({ ...view, connections: view.connections.map((connection) => connection.id === id ? { ...connection, ...patch, updatedAt: new Date().toISOString() } : connection) }));
+  };
+  const selectForConnection = (id: string) => {
+    if (activeView.readOnly) return;
+    if (!connectionStartId) { setConnectionStartId(id); setSelectedId(id); return; }
+    if (connectionStartId === id) { setConnectionStartId(""); return; }
+    const source = objects.find((object) => object.id === connectionStartId);
+    const target = objects.find((object) => object.id === id);
+    const now = new Date().toISOString();
+    setPendingConnection({ id: crypto.randomUUID(), sourceConceptId: connectionStartId, targetConceptId: id, relationType: "similarity", label: `${source?.name ?? "Concept"} ↔ ${target?.name ?? "Concept"}`, description: "", dimensions: [{ id: crypto.randomUUID(), label: defaultDimensions[0], relation: "unknown" }], lineStyle: "solid", color: "#e7d48f", opacity: 0.85, createdAt: now, updatedAt: now });
+    setConnectionStartId(""); setSelectedId("");
+  };
+  const savePendingConnection = () => {
+    if (!pendingConnection || activeView.readOnly) return;
+    editView((view) => ({ ...view, connections: [...view.connections, pendingConnection] }));
+    setSelectedConnectionId(pendingConnection.id); setPendingConnection(null);
+  };
+  const updateLayer = (id: string, patch: Partial<LayerDefinition>) => {
+    if (activeView.readOnly) return;
+    editView((view) => ({ ...view, layers: view.layers.map((layer) => layer.id === id ? { ...layer, ...patch } : layer) }));
+  };
+  const addLayer = () => {
+    const name = window.prompt("Layer name", "New layer"); if (!name || activeView.readOnly) return;
+    const order = Math.max(0, ...layers.map((layer) => layer.order)) + 1;
+    editView((view) => ({ ...view, layers: [...view.layers, { id: crypto.randomUUID(), name, description: "", visible: true, opacity: 1, order }] }));
+  };
+  const removeLayer = (id: string) => {
+    if (activeView.readOnly || layers.length < 2) return;
+    const destination = layers.find((layer) => layer.id !== id); if (!destination || !window.confirm(`Delete this layer? Its objects will move to “${destination.name}”.`)) return;
+    editView((view) => ({ ...view, layers: view.layers.filter((layer) => layer.id !== id), objects: view.objects.map((object) => object.layerId === id ? { ...object, layerId: destination.id } : object) }));
   };
 
   useEffect(() => {
@@ -292,7 +378,7 @@ export function CognitiveMap() {
       if (cancelled) return;
       if (error) { setSyncState("error"); return; }
       const remote = (data ?? []).map((row) => row.data as MapView);
-      if (remote.length) { const normalized = remote.map(normalizeViewAxisLabels); setViews(normalized); setActiveViewId(normalized[0].id); }
+      if (remote.length) { const normalized = remote.map(normalizeView); setViews(normalized); setActiveViewId(normalized[0].id); }
       setSyncState("online");
     });
     return () => { cancelled = true; };
@@ -307,7 +393,7 @@ export function CognitiveMap() {
         const remote = record.data;
         if (!remote || remote.id !== activeViewId) return;
         applyingRemote.current = true;
-        setViews((items) => items.map((view) => view.id === remote.id ? normalizeViewAxisLabels(remote) : view));
+        setViews((items) => items.map((view) => view.id === remote.id ? normalizeView(remote) : view));
       })
       .on("presence", { event: "sync" }, () => {
         setCollaborators(Object.keys(channel.presenceState()).length || 1);
@@ -351,7 +437,7 @@ export function CognitiveMap() {
   const addObject = () => {
     if (activeView.readOnly) return;
     const id = crypto.randomUUID();
-    editView((view) => ({ ...view, objects: [...view.objects, { ...initialObjects[1], id, conceptId: id, name: "New Concept", description: "", x: 0, y: 0, z: 0, color: "#d7b66f" }] }));
+    editView((view) => ({ ...view, objects: [...view.objects, { ...initialObjects[1], id, conceptId: id, name: "New Concept", description: "", x: 0, y: 0, z: 0, color: "#d7b66f", layerId: view.layers[0]?.id ?? "theories", thinkers: [] }] }));
     setSelectedId(id);
   };
   const duplicate = () => {
@@ -370,7 +456,8 @@ export function CognitiveMap() {
   };
   const duplicateView = () => {
     const name = window.prompt("Duplicate view as", `${activeView.name} copy`); if (!name) return;
-    const copy: MapView = { ...activeView, id: crypto.randomUUID(), name, ownerName: "You", readOnly: false, objects: activeView.objects.map((object) => ({ ...object, id: crypto.randomUUID() })), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const idMap = new Map(activeView.objects.map((object) => [object.id, crypto.randomUUID()]));
+    const copy: MapView = { ...activeView, id: crypto.randomUUID(), name, ownerName: "You", readOnly: false, objects: activeView.objects.map((object) => ({ ...object, id: idMap.get(object.id)! })), connections: activeView.connections.map((connection) => ({ ...connection, id: crypto.randomUUID(), sourceConceptId: idMap.get(connection.sourceConceptId) ?? connection.sourceConceptId, targetConceptId: idMap.get(connection.targetConceptId) ?? connection.targetConceptId })), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     setViews((items) => [...items, copy]); setActiveViewId(copy.id);
   };
   const renameView = () => {
@@ -386,7 +473,7 @@ export function CognitiveMap() {
   };
   const importView = async (file?: File) => {
     if (!file) return;
-    try { const parsed = JSON.parse(await file.text()) as MapView; if (!parsed.name || !Array.isArray(parsed.objects)) throw new Error(); const imported = { ...parsed, id: crypto.randomUUID(), roomId: activeView.roomId, name: `${parsed.name} import`, readOnly: false }; setViews((items) => [...items, imported]); setActiveViewId(imported.id); } catch { window.alert("This file is not a valid ECM View JSON document."); }
+    try { const parsed = JSON.parse(await file.text()) as MapView; if (!parsed.name || !Array.isArray(parsed.objects)) throw new Error(); const imported = normalizeView({ ...parsed, id: crypto.randomUUID(), roomId: activeView.roomId, name: `${parsed.name} import`, readOnly: false }); setViews((items) => [...items, imported]); setActiveViewId(imported.id); } catch { window.alert("This file is not a valid ECM View JSON document."); }
   };
 
   return <main className="app-shell">
@@ -394,14 +481,16 @@ export function CognitiveMap() {
     <nav className="viewbar" aria-label="Researcher views"><span className="eyebrow">Views</span><div className="viewtabs">{views.map((view) => <button key={view.id} className={view.id === activeViewId ? "active" : ""} onClick={() => { setActiveViewId(view.id); setSelectedId(""); }}>{view.name}{view.readOnly && <small> read only</small>}</button>)}<button className="add-view" onClick={newView}>+</button></div><div className="view-actions"><button onClick={renameView} disabled={activeView.readOnly}>Rename</button><button onClick={duplicateView}>Duplicate</button><button onClick={() => void saveViews()}>{saved ? "Saved" : "Save"}</button><button onClick={exportView}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={deleteView}>Delete</button><input ref={importRef} hidden type="file" accept="application/json" onChange={(e) => void importView(e.target.files?.[0])} /></div></nav>
     <section className="workspace">
       <div className="viewport" aria-label="Interactive three-dimensional concept map">
-        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName} · {collaborators} online</span><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button><button disabled title="Coming in Ver.2.1">Connect</button></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
-        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => setSelectedId("")}><MappingScene objects={objects} axisLabels={activeView.axisLabels} selectedId={activeView.readOnly ? "" : selectedId} mode={mode} onSelect={setSelectedId} onChange={update} onDragging={setDraggingObject} dragging={draggingObject} editable={!activeView.readOnly} onAxisSave={(axis, value) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [axis]: value } }))} /></Canvas>
-        <div className="control-hint"><span><b>Drag sphere</b> screen plane</span><span><b>Shift + drag</b> depth (Z)</span><span><b>Drag space</b> rotate</span></div>
+        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName} · {collaborators} online</span><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button><button className={mode === "connect" ? "active" : ""} disabled={activeView.readOnly} onClick={() => { setMode("connect"); setConnectionStartId(""); }}>Connect</button></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
+        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => { setSelectedId(""); if (mode === "connect") setConnectionStartId(""); }}><MappingScene objects={objects} connections={connections} layers={layers} axisLabels={activeView.axisLabels} selectedId={activeView.readOnly ? "" : selectedId} mode={mode} thinkerObjectId={thinkerObjectId} onSelect={setSelectedId} onConnectSelect={selectForConnection} onOpenThinker={(id) => setThinkerObjectId((current) => current === id ? "" : id)} onSelectConnection={(id) => { setSelectedConnectionId(id); setPendingConnection(null); }} onChange={update} onDragging={setDraggingObject} dragging={draggingObject} editable={!activeView.readOnly} onAxisSave={(axis, value) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [axis]: value } }))} /></Canvas>
+        <div className="layer-panel"><div><b>Layers</b><button disabled={activeView.readOnly} onClick={addLayer}>+ Add</button></div>{[...layers].sort((a, b) => a.order - b.order).map((layer) => <details key={layer.id}><summary><input type="checkbox" checked={layer.visible} disabled={activeView.readOnly} onChange={(e) => updateLayer(layer.id, { visible: e.target.checked })} onClick={(e) => e.stopPropagation()} /> {layer.name}</summary><label>Name<input disabled={activeView.readOnly} value={layer.name} onChange={(e) => updateLayer(layer.id, { name: e.target.value })} /></label><label>Description<input disabled={activeView.readOnly} value={layer.description ?? ""} onChange={(e) => updateLayer(layer.id, { description: e.target.value })} /></label><label>Opacity <input type="range" min="0.05" max="1" step="0.05" disabled={activeView.readOnly} value={layer.opacity ?? 1} onChange={(e) => updateLayer(layer.id, { opacity: Number(e.target.value) })} /></label><button disabled={activeView.readOnly || layers.length < 2} className="danger" onClick={() => removeLayer(layer.id)}>Delete layer</button></details>)}</div>
+        <div className="control-hint">{mode === "connect" ? <span><b>Connect:</b> {connectionStartId ? "choose a second sphere" : "choose two spheres"}</span> : <><span><b>Drag sphere</b> screen plane</span><span><b>Shift + drag</b> depth (Z)</span><span><b>Drag space</b> rotate</span></>}</div>
       </div>
       <aside className="inspector">
         <div className="inspector-head"><span className="eyebrow">Object editor</span><span className="phase-badge">{activeView.readOnly ? "Read only" : "Edit mode"}</span></div>
+        {(pendingConnection || selectedConnection) && (() => { const connection = pendingConnection ?? selectedConnection!; const source = objects.find((object) => object.id === connection.sourceConceptId); const target = objects.find((object) => object.id === connection.targetConceptId); const change = (patch: Partial<Connection>) => pendingConnection ? setPendingConnection({ ...connection, ...patch, updatedAt: new Date().toISOString() }) : updateConnection(connection.id, patch); return <section className="connection-editor"><div className="connection-title"><h3>{pendingConnection ? "New connection" : "Connection"}</h3><button onClick={() => { setPendingConnection(null); setSelectedConnectionId(""); }}>×</button></div><p>{source?.name ?? "Unknown"} <b>↔</b> {target?.name ?? "Unknown"}</p><label>Relation<select disabled={activeView.readOnly} value={connection.relationType} onChange={(e) => { const relationType = e.target.value as Connection["relationType"]; change({ relationType, lineStyle: relationType === "difference" || relationType === "historical" ? "dashed" : relationType === "criticism" ? "dotted" : "solid" }); }}>{["similarity", "difference", "influence", "criticism", "historical", "compatibility", "other"].map((type) => <option key={type}>{type}</option>)}</select></label><label>Label<input disabled={activeView.readOnly} value={connection.label} onChange={(e) => change({ label: e.target.value })} /></label><label>Description<textarea disabled={activeView.readOnly} rows={2} value={connection.description ?? ""} onChange={(e) => change({ description: e.target.value })} /></label><h4>Comparison dimensions</h4>{connection.dimensions.map((dimension) => <div className="dimension-row" key={dimension.id}><input disabled={activeView.readOnly} value={dimension.label} onChange={(e) => change({ dimensions: connection.dimensions.map((item) => item.id === dimension.id ? { ...item, label: e.target.value } : item) })} /><select disabled={activeView.readOnly} value={dimension.relation ?? "unknown"} onChange={(e) => change({ dimensions: connection.dimensions.map((item) => item.id === dimension.id ? { ...item, relation: e.target.value as ComparisonDimension["relation"] } : item) })}>{["same", "similar", "different", "debated", "unknown"].map((relation) => <option key={relation}>{relation}</option>)}</select><button disabled={activeView.readOnly} onClick={() => change({ dimensions: connection.dimensions.filter((item) => item.id !== dimension.id) })}>−</button></div>)}<button disabled={activeView.readOnly} onClick={() => change({ dimensions: [...connection.dimensions, { id: crypto.randomUUID(), label: defaultDimensions[0], relation: "unknown" }] })}>+ Dimension</button><div className="connection-actions">{pendingConnection ? <><button onClick={() => setPendingConnection(null)}>Cancel</button><button className="primary-button" onClick={savePendingConnection}>Save connection</button></> : <button className="danger" disabled={activeView.readOnly} onClick={() => { editView((view) => ({ ...view, connections: view.connections.filter((item) => item.id !== connection.id) })); setSelectedConnectionId(""); }}>Delete connection</button>}</div></section>; })()}
         {selected ? <>
-          <div className="selection-title"><span className="color-chip" style={{ backgroundColor: selected.color }} /><div><input className="title-input" value={selected.name} onChange={(e) => update(selected.id, { name: e.target.value })} /><select className="category-input" value={selected.categoryId ?? "other"} onChange={(e) => { const category = categories.find((item) => item.id === e.target.value); const color = palette.find((item) => item.id === category?.defaultColorId); if (category && color) update(selected.id, { categoryId: category.id, category: category.name, colorId: color.id, customColor: undefined, color: color.hex }); }}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></div></div>
+          <div className="selection-title"><span className="color-chip" style={{ backgroundColor: selected.color }} /><div><input className="title-input" value={selected.name} onChange={(e) => update(selected.id, { name: e.target.value })} /><select className="category-input" value={selected.categoryId ?? "other"} onChange={(e) => { const category = categories.find((item) => item.id === e.target.value); const color = palette.find((item) => item.id === category?.defaultColorId); if (category && color) update(selected.id, { categoryId: category.id, category: category.name, colorId: color.id, customColor: undefined, color: color.hex }); }}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><select className="category-input" value={selected.layerId ?? layers[0]?.id} onChange={(e) => update(selected.id, { layerId: e.target.value })}>{layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.name}</option>)}</select></div></div>
           <section className="editor-section"><h3>Position</h3><div className="number-row">{(["x", "y", "z"] as const).map((axis) => <label key={axis}><span>{axis.toUpperCase()}</span><input type="number" step="0.1" value={Number(selected[axis].toFixed(2))} onChange={(e) => update(selected.id, { [axis]: Number(e.target.value) })} /></label>)}</div><button className="text-button" onClick={() => update(selected.id, { x: 0, y: 0, z: 0 })}>Reset position</button></section>
           <section className="editor-section"><h3>Shape · sphere</h3><RangeField label="Scale X" value={selected.scaleX} min={0.1} max={3} step={0.05} onChange={(scaleX) => update(selected.id, { scaleX })} /><RangeField label="Scale Y" value={selected.scaleY} min={0.1} max={3} step={0.05} onChange={(scaleY) => update(selected.id, { scaleY })} /><RangeField label="Scale Z" value={selected.scaleZ} min={0.1} max={3} step={0.05} onChange={(scaleZ) => update(selected.id, { scaleZ })} /><RangeField label="Base size" value={selected.size} min={0.2} max={2} step={0.05} onChange={(size) => update(selected.id, { size })} /></section>
           <section className="editor-section"><h3>Categorical color</h3><div className="color-swatches">{palette.map((color) => <button key={color.id} type="button" aria-label={color.name} title={color.name} className={selected.colorId === color.id && !selected.customColor ? "selected" : ""} style={{ backgroundColor: color.hex }} onClick={() => update(selected.id, { color: color.hex, colorId: color.id, customColor: undefined })} />)}</div><button className="text-button" onClick={() => setShowCustomColor((value) => !value)}>Custom color…</button>{showCustomColor && <label className="custom-color"><input type="color" value={selected.customColor ?? selected.color} onChange={(e) => update(selected.id, { color: e.target.value, customColor: e.target.value, colorId: undefined })} /><code>{selected.customColor ?? selected.color}</code></label>}<RangeField label="Opacity" value={selected.opacity} min={0.05} max={1} step={0.05} onChange={(opacity) => update(selected.id, { opacity })} /></section>

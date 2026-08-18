@@ -112,6 +112,20 @@ button, input, textarea { font: inherit; }
 .axis-pair { border-top: 1px solid rgba(170, 201, 185, .14); margin-top: 8px; padding-top: 7px; }
 .axis-pair:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
 .axis-pair strong { color: #c9d9d1; font-size: 10px; letter-spacing: .08em; }
+.layer-panel { position: absolute; z-index: 3; top: 62px; left: 22px; width: min(255px, 31vw); padding: 9px; border: 1px solid #3b5047; border-radius: 5px; background: rgba(16,25,22,.92); color: #c7d1cc; font-size: 10px; }
+.layer-panel > div { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.layer-panel button { border: 1px solid #465d53; border-radius: 3px; padding: 3px 6px; color: #cdd7d1; background: #1a2923; font-size: 9px; cursor: pointer; }
+.layer-panel details { border-top: 1px solid rgba(160,190,175,.16); padding: 5px 1px; }
+.layer-panel summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-panel label { display: grid; gap: 3px; margin: 7px 0; color: #91a39a; }
+.layer-panel input:not([type="checkbox"]) { min-width: 0; padding: 4px; border: 1px solid #3b5047; border-radius: 3px; color: #dfe5e1; background: #111b17; font-size: 9px; }
+.layer-panel .danger { color: #d7a29a; border-color: #65463f; }
+.thinker-card { position: relative; width: 285px; padding: 14px; border: 1px solid #728a7d; border-radius: 7px; color: #dbe4de; background: rgba(18,30,25,.97); box-shadow: 0 12px 32px rgba(0,0,0,.35); font: 11px/1.45 var(--font-geist-sans), sans-serif; }
+.thinker-card small, .thinker-card h4 { color: #d9c176; letter-spacing: .06em; }
+.thinker-card h4 { margin: 10px 0 3px; font-size: 10px; text-transform: uppercase; }
+.thinker-card p { margin: 3px 0; }.thinker-card ul { margin: 3px 0; padding-left: 17px; }
+.thinker-head { display: flex; gap: 9px; align-items: center; }.thinker-head img, .thinker-placeholder { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; }.thinker-placeholder { display: grid; place-items: center; color: #1c2822; background: #d9c176; font-weight: 700; }.thinker-head strong, .thinker-head span, .thinker-head em { display: block; }.thinker-head em { color: #9aaca3; font-size: 9px; }.card-close { position: absolute; top: 7px; right: 7px; }.card-actions { display: flex; gap: 5px; margin-top: 9px; }.thinker-card button { border: 1px solid #496056; border-radius: 3px; padding: 3px 7px; color: #d2ddd6; background: #1c2b25; cursor: pointer; font-size: 9px; }
+.connection-editor { margin-bottom: 17px; padding: 12px; border: 1px solid #637c70; border-radius: 5px; background: #16231e; }.connection-title { display: flex; justify-content: space-between; align-items: center; }.connection-title h3, .connection-editor h4 { margin: 0; color: #ddc87f; font-size: 11px; }.connection-editor p { margin: 8px 0; color: #a8b8af; font-size: 10px; }.connection-editor label { display: grid; gap: 4px; margin: 7px 0; color: #91a39a; font-size: 9px; }.connection-editor input, .connection-editor select, .connection-editor textarea { width: 100%; min-width: 0; padding: 5px; border: 1px solid #3c5147; border-radius: 3px; color: #e0e6e2; background: #101a16; font-size: 10px; }.dimension-row { display: grid; grid-template-columns: 1fr 85px 24px; gap: 4px; margin: 5px 0; }.dimension-row button, .connection-editor > button, .connection-actions button { border: 1px solid #465d53; border-radius: 3px; padding: 4px 6px; color: #cdd7d1; background: #1a2923; font-size: 9px; cursor: pointer; }.connection-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }.connection-actions .danger { color: #d7a29a; border-color: #65463f; }
 
 @media (max-width: 900px) {
   body { overflow: auto; }

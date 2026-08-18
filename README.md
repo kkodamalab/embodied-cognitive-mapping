@@ -12,7 +12,7 @@
 - 3D画面上でのXYZ軸ラベルのインライン編集
 - object追加・複製・削除・位置リセット
 - 研究者別Viewタブ、New・Rename・Duplicate・Save・Delete・Read only
-- Viewごとの軸ラベル・camera・connections/layers拡張領域
+- 理論ごとのThinkerカード、比較可能なConnection、可視性・透明度を持つLayer
 - JSON Import / Export
 - Room作成・参加・URLコピー
 - Supabase Database永続化、View単位Realtime同期、簡易プレゼンス
@@ -71,7 +71,14 @@ pnpm build
 - 位置は直接ドラッグ、Transform gizmo、Object EditorのXYZ数値入力の3方式で編集できます。
 - 空白部分のドラッグでカメラ回転、ホイールでズーム、右ドラッグでパンします。
 - XYZ軸ラベルは3D画面上のラベルをダブルクリックして編集できます。`Enter` またはフォーカスアウトで確定、`Esc` でキャンセルします。軸名はViewごとに保存・同期されます。
-- 上部モードは `Move`、`Shape`、`Connect` です。`Connect` は将来実装のため現在disabledです。
+- 球体をダブルクリックすると、その理論に登録されたThinkerカードを開きます。カードでは人物、役割、代表メッセージ、主要文献を確認でき、複数人がいる場合は前後ボタンで切替できます。
+- 上部モードは `Move`、`Shape`、`Connect` です。`Connect` では球体を2つ順に選ぶと、保存前に関係ラベル・関係種別・比較次元を編集できます。線をクリックすると既存の関係を再編集できます。
+
+## Thinkers, Connections, and Layers
+
+- Thinkerデータは各objectの `thinkers` 配列に保持します。画像URL、人物名、年代、役割、代表メッセージ、参考文献を任意に記録できます。初期サンプルのメッセージはデモ用であり、研究利用前に査読済みの内容へ置換してください。
+- ConnectionはView単位で保存されます。`sourceConceptId` / `targetConceptId` は、そのView内で結ばれたobjectのIDを保持し、`relationType`、`label`、`description`、`dimensions`、線の見た目を持ちます。各比較次元には同一・類似・異なる・議論中などを記録できます。
+- LayerはView単位の `LayerDefinition { id, name, description, visible, opacity, order }` です。画面左のLayersパネルから表示、透明度、名称、説明、追加、削除を管理できます。各objectはObject editorのLayer選択で所属を変更します。Layerを削除すると、そのobjectは残る最初のLayerへ安全に移動します。
 
 ## Category and color
 
@@ -98,4 +105,4 @@ GitHub Pages版はブラウザ内のLocal modeで動作します。Supabaseの�
 - Compareの重ね合わせ表示とUndo/RedoはVer.2.1予定
 - camera位置のデータ領域はあるが、現在のカメラ操作結果の自動保存は未実装
 - Ver.2の匿名RLSはRoom URLを知る利用者向け。公開探索や厳密な所有権には認証が必要
-- theory connections、layer表示、multimedia、WebXRは将来拡張
+- 比較次元の可視化、Connection検索・フィルタ、Layer間分析、WebXRは今後の拡張候補
