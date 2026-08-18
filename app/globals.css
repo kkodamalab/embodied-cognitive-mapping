@@ -41,12 +41,16 @@ button, input, textarea { font: inherit; }
 .tool-toggle { display: flex; gap: 3px; padding: 3px; border: 1px solid #385047; border-radius: 5px; background: #14211c; pointer-events: auto; }
 .tool-toggle button { padding: 5px 9px; border: 0; border-radius: 3px; color: #81948b; background: transparent; font-size: 10px; cursor: pointer; }
 .tool-toggle button.active { color: #18211e; background: #d8bd7b; }
+.tool-toggle button:disabled { opacity: .35; cursor: not-allowed; }
 .control-hint { position: absolute; z-index: 2; bottom: 18px; left: 22px; display: flex; gap: 18px; color: #7f9289; font-size: 11px; pointer-events: none; }
 .control-hint b { color: #bbc7c1; font-weight: 550; }
 
 .concept-label { display: block; padding: 5px 8px; border-radius: 4px; color: #d8dfdb; background: rgba(15,24,21,.82); border: 1px solid rgba(93,117,106,.55); white-space: nowrap; font: 11px var(--font-geist-sans), sans-serif; box-shadow: 0 5px 16px rgba(0,0,0,.25); }
 .concept-label.selected { color: #fff7df; border-color: #dbc27d; background: rgba(45,43,31,.9); }
 .axis-label { display: block; width: max-content; max-width: 230px; padding: 4px 6px; background: rgba(12,20,17,.65); font: 600 9px/1.35 var(--font-geist-mono), monospace; letter-spacing: .03em; text-align: center; }
+.axis-label.editable { cursor: text; transition: background .15s, box-shadow .15s; }
+.axis-label.editable:hover { background: rgba(48,64,56,.95); box-shadow: 0 0 0 1px #7f968b; }
+.axis-inline-input { width: 300px; padding: 7px 9px; border: 1px solid #d2b873; border-radius: 4px; outline: none; color: #edf0eb; background: #17231e; font: 10px var(--font-geist-mono), monospace; }
 
 .inspector { padding: 23px; border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; }
 .inspector-head { justify-content: space-between; margin-bottom: 29px; }
@@ -90,6 +94,17 @@ button, input, textarea { font: inherit; }
 .object-actions button, .primary-button { padding: 9px; border: 1px solid #43584f; border-radius: 4px; color: #bbc8c2; background: #1b2924; cursor: pointer; }
 .object-actions button.danger { color: #d7a29a; border-color: #65463f; }
 .primary-button { width: 100%; color: #1b241f; border-color: #d5bb77; background: #d5bb77; font-weight: 600; }
+.color-swatches { display: grid; grid-template-columns: repeat(6, 28px); gap: 8px; margin-bottom: 4px; }
+.color-swatches button { width: 26px; height: 26px; border: 2px solid transparent; border-radius: 50%; cursor: pointer; box-shadow: 0 0 0 1px rgba(255,255,255,.18); }
+.color-swatches button.selected { border-color: #101916; box-shadow: 0 0 0 2px #f2e2b1; transform: scale(1.08); }
+.custom-color { display: flex; align-items: center; gap: 10px; margin: 9px 0; }
+.custom-color input { width: 38px; height: 28px; padding: 2px; }
+.custom-color code { color: #9aaca3; font-size: 10px; }
+.palette-editor { margin: 14px 0; padding: 10px; border: 1px solid var(--line); border-radius: 4px; }
+.palette-editor summary { color: #aab8b1; font-size: 10px; cursor: pointer; }
+.palette-editor label { display: grid; grid-template-columns: 1fr 92px; gap: 8px; align-items: center; margin-top: 8px; }
+.palette-editor label span { color: #879990; font-size: 9px; }
+.palette-editor select { min-width: 0; padding: 5px; border: 1px solid #3b5047; border-radius: 3px; color: #bbc8c2; background: #13201b; font-size: 9px; }
 .axis-editor label { display: grid; grid-template-columns: 18px 1fr; align-items: center; gap: 7px; margin: 6px 0; }
 .axis-editor label span { color: #7e9188; font: 9px var(--font-geist-mono), monospace; }
 .axis-editor input { padding: 7px; font-size: 9px; }

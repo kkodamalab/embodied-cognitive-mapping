@@ -5,8 +5,9 @@
 ## Implemented
 
 - XYZ軸、グリッド、軸ラベル、10件のサンプル概念
-- 回転・ズーム・パン、TransformControlsによる移動と変形
-- XYZ座標、基本サイズ、Scale X/Y/Z、色、透明度、名称、説明、分類の編集
+- 球体の直接ドラッグ、回転・ズーム・パン、TransformControlsによる移動と変形
+- XYZ座標、基本サイズ、Scale X/Y/Z、カテゴリカル色、透明度、名称、説明、分類の編集
+- 3D画面上でのXYZ軸ラベルのインライン編集
 - object追加・複製・削除・位置リセット
 - 研究者別Viewタブ、New・Rename・Duplicate・Save・Delete・Read only
 - Viewごとの軸ラベル・camera・connections/layers拡張領域
@@ -61,9 +62,24 @@ pnpm build
 - 同じViewを開いた利用者にだけ、そのViewのRealtime変更が反映されます。
 - `Duplicate` で他者Viewを自分の編集可能なViewとして複製できます。
 
+## 3D interaction
+
+- `Move` モードでは球体を左ドラッグすると、掴んだ位置を保ちながら現在のカメラに平行なscreen-plane上を移動します。ドラッグ中はカメラ回転が停止し、Object EditorのXYZ値がリアルタイムに更新されます。
+- `Shift + 左ドラッグ` はワールドZ方向の奥行き操作です。上へドラッグするとZが増え、下へドラッグすると減ります。
+- 位置は直接ドラッグ、Transform gizmo、Object EditorのXYZ数値入力の3方式で編集できます。
+- 空白部分のドラッグでカメラ回転、ホイールでズーム、右ドラッグでパンします。
+- XYZ軸ラベルは3D画面上のラベルをダブルクリックして編集できます。`Enter` またはフォーカスアウトで確定、`Esc` でキャンセルします。軸名はViewごとに保存・同期されます。
+- 上部モードは `Move`、`Shape`、`Connect` です。`Connect` は将来実装のため現在disabledです。
+
+## Category and color
+
+通常の色操作は、ダーク背景で識別しやすい12色の離散パレットを使います。スウォッチを選ぶと即時反映され、自由色は `Custom color…` を開いた場合にのみ指定できます。Opacityは色と独立した0.05〜1.0の値です。
+
+各Viewは `PaletteColor { id, name, hex }` と `Category { id, name, defaultColorId }` を保持します。各objectは `categoryId`、`colorId`、`customColor` を持てるため、Category由来の色と明示的な上書きを区別できます。Categoryを変更するとそのCategoryの既定色を適用し、その後スウォッチまたはCustom colorで個別に上書きできます。`Category palette` からCategoryごとの既定色を変更できます。これらはView JSON、Supabase永続化、Realtime同期の対象です。
+
 ## View JSON
 
-View JSONは `id`, `roomId`, `name`, `ownerName`, `readOnly`, `axisLabels`, `camera`, `objects`, `connections`, `layers`, `createdAt`, `updatedAt` を持ちます。各objectは概念情報と、座標・scale・色・opacity等のView表現を保持します。
+View JSONは `id`, `roomId`, `name`, `ownerName`, `readOnly`, `axisLabels`, `camera`, `palette`, `categories`, `objects`, `connections`, `layers`, `createdAt`, `updatedAt` を持ちます。各objectは概念情報と、座標・scale・categoryId・colorId・customColor・opacity等のView表現を保持します。
 
 ## Deployment
 

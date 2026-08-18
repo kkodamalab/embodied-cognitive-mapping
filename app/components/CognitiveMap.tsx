@@ -1,9 +1,9 @@
 "use client";
 
 import { Html, OrbitControls, PerspectiveCamera, TransformControls } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
-import type { Group } from "three";
+import { Plane, Vector3, type Group } from "three";
 import { supabase } from "../lib/supabase";
 
 type Concept = {
@@ -27,11 +27,16 @@ type ViewObject = {
   color: string;
   opacity: number;
   shapeType: "sphere";
+  categoryId?: string;
+  colorId?: string;
+  customColor?: string;
 };
 
 type MapObject = Concept & ViewObject;
 type TransformMode = "translate" | "scale";
 type AxisLabels = { x: string; y: string; z: string };
+type PaletteColor = { id: string; name: string; hex: string };
+type CategoryDefinition = { id: string; name: string; defaultColorId: string };
 type MapView = {
   id: string;
   roomId: string;
@@ -43,6 +48,8 @@ type MapView = {
   objects: MapObject[];
   connections: unknown[];
   layers: unknown[];
+  palette: PaletteColor[];
+  categories: CategoryDefinition[];
   createdAt: string;
   updatedAt: string;
 };
@@ -63,6 +70,8 @@ const initialObjects: MapObject[] = [
   description: `${name} is positioned provisionally for discussion and may be freely reinterpreted.`,
   category: String(category), references: [], x: Number(x), y: Number(y), z: Number(z),
   size: Number(size), scaleX: 1, scaleY: 1, scaleZ: 1, color: String(color), opacity: 1, shapeType: "sphere" as const,
+  categoryId: String(category).includes("Computational") ? "computational" : String(category).includes("Ecological") ? "ecological" : String(category).includes("Enactive") ? "enactive" : String(category).includes("Situated") ? "extended" : String(category).includes("Classical") ? "classical" : "embodied",
+  colorId: undefined, customColor: String(color),
 }));
 
 const axisLabels = {
@@ -71,10 +80,28 @@ const axisLabels = {
   z: "Individual  ←  Body  ←  Environment  ←  Social / Cultural",
 };
 
+const defaultPalette: PaletteColor[] = [
+  { id: "red", name: "Red", hex: "#e06c68" }, { id: "orange", name: "Orange", hex: "#df9562" },
+  { id: "yellow", name: "Yellow", hex: "#dfbd63" }, { id: "green", name: "Green", hex: "#78ad72" },
+  { id: "teal", name: "Teal", hex: "#62a89b" }, { id: "cyan", name: "Cyan", hex: "#68b8c4" },
+  { id: "blue", name: "Blue", hex: "#709dcc" }, { id: "indigo", name: "Indigo", hex: "#7d83c6" },
+  { id: "purple", name: "Purple", hex: "#a17cbd" }, { id: "pink", name: "Pink", hex: "#cf7fa5" },
+  { id: "gray", name: "Gray", hex: "#8d9b95" }, { id: "white", name: "White", hex: "#e4e6df" },
+];
+const defaultCategories: CategoryDefinition[] = [
+  { id: "classical", name: "Classical Cognitivism", defaultColorId: "orange" },
+  { id: "embodied", name: "Embodied / Embedded", defaultColorId: "yellow" },
+  { id: "extended", name: "Extended / Distributed", defaultColorId: "cyan" },
+  { id: "enactive", name: "Enactive", defaultColorId: "purple" },
+  { id: "ecological", name: "Ecological", defaultColorId: "green" },
+  { id: "computational", name: "Predictive / Computational", defaultColorId: "pink" },
+  { id: "other", name: "Other", defaultColorId: "gray" },
+];
+
 const createView = (id: string, name: string, ownerName: string, offset = 0, readOnly = false): MapView => ({
   id, roomId: "demo-room", name, ownerName, readOnly, axisLabels: { ...axisLabels }, camera: [12, 10, 14],
   objects: initialObjects.map((object, index) => ({ ...object, x: object.x + (index % 2 ? offset : -offset), z: object.z + offset * 0.5 })),
-  connections: [], layers: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  connections: [], layers: [], palette: defaultPalette, categories: defaultCategories, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
 });
 
 const starterViews: MapView[] = [
@@ -84,21 +111,58 @@ const starterViews: MapView[] = [
   createView("enactive", "Enactive", "Researcher B", -0.65, true),
 ];
 
-function AxisLabel({ position, label, tone }: { position: [number, number, number]; label: string; tone: string }) {
-  return <Html position={position} center distanceFactor={13} style={{ pointerEvents: "none" }}><span className="axis-label" style={{ color: tone }}>{label}</span></Html>;
+function AxisLabel({ position, label, tone, editable, onSave }: { position: [number, number, number]; label: string; tone: string; editable: boolean; onSave: (value: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(label);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+  const commit = () => { const value = draft.trim(); if (value && value !== label) onSave(value); setEditing(false); };
+  return <Html position={position} center distanceFactor={13} style={{ pointerEvents: "auto" }}>
+    {editing ? <input ref={inputRef} className="axis-inline-input" value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(label); setEditing(false); } }} />
+      : <span className={`axis-label${editable ? " editable" : ""}`} style={{ color: tone }} title={editable ? "Double-click to edit" : undefined} onDoubleClick={(e) => { e.stopPropagation(); if (editable) { setDraft(label); setEditing(true); } }}>{label}</span>}
+  </Html>;
 }
 
-function ObjectMesh({ object, selected, mode, onSelect, onTransform }: {
+function ObjectMesh({ object, selected, mode, onSelect, onTransform, onDragging }: {
   object: MapObject;
   selected: boolean;
   mode: TransformMode;
   onSelect: () => void;
   onTransform: (patch: Partial<MapObject>) => void;
+  onDragging: (dragging: boolean) => void;
 }) {
   const group = useRef<Group>(null);
+  const camera = useThree((state) => state.camera);
+  const dragging = useRef(false);
+  const dragPlane = useRef(new Plane());
+  const dragOffset = useRef(new Vector3());
+  const dragPoint = useRef(new Vector3());
+  const startClientY = useRef(0);
+  const startZ = useRef(0);
+  const beginDrag = (event: ThreeEvent<PointerEvent>) => {
+    if (mode !== "translate") return;
+    event.stopPropagation(); onSelect(); dragging.current = true; onDragging(true);
+    startClientY.current = event.nativeEvent.clientY; startZ.current = object.z;
+    const normal = camera.getWorldDirection(new Vector3());
+    dragPlane.current.setFromNormalAndCoplanarPoint(normal, new Vector3(object.x, object.y, object.z));
+    event.ray.intersectPlane(dragPlane.current, dragPoint.current);
+    dragOffset.current.copy(dragPoint.current).sub(new Vector3(object.x, object.y, object.z));
+    (event.target as Element).setPointerCapture(event.pointerId); document.body.style.cursor = "grabbing";
+  };
+  const moveDrag = (event: ThreeEvent<PointerEvent>) => {
+    if (!dragging.current) return;
+    event.stopPropagation();
+    if (event.nativeEvent.shiftKey) onTransform({ z: startZ.current + (startClientY.current - event.nativeEvent.clientY) * 0.025 });
+    else if (event.ray.intersectPlane(dragPlane.current, dragPoint.current)) onTransform({ x: dragPoint.current.x - dragOffset.current.x, y: dragPoint.current.y - dragOffset.current.y, z: dragPoint.current.z - dragOffset.current.z });
+  };
+  const endDrag = (event: ThreeEvent<PointerEvent>) => {
+    if (!dragging.current) return;
+    dragging.current = false; onDragging(false); event.stopPropagation();
+    (event.target as Element).releasePointerCapture(event.pointerId); document.body.style.cursor = "auto";
+  };
   const body = (
     <group ref={group} position={[object.x, object.y, object.z]} scale={[object.scaleX, object.scaleY, object.scaleZ]}>
-      <mesh onClick={(event) => { event.stopPropagation(); onSelect(); }} renderOrder={object.opacity < 1 ? 2 : 0}>
+      <mesh onClick={(event) => { event.stopPropagation(); onSelect(); }} onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerOver={() => { if (mode === "translate") document.body.style.cursor = "grab"; }} onPointerOut={() => { if (!dragging.current) document.body.style.cursor = "auto"; }} renderOrder={object.opacity < 1 ? 2 : 0}>
         <sphereGeometry args={[object.size, 40, 40]} />
         <meshStandardMaterial
           color={object.color}
@@ -135,13 +199,17 @@ function ObjectMesh({ object, selected, mode, onSelect, onTransform }: {
   );
 }
 
-function MappingScene({ objects, axisLabels, selectedId, mode, onSelect, onChange }: {
+function MappingScene({ objects, axisLabels, selectedId, mode, onSelect, onChange, onDragging, dragging, editable, onAxisSave }: {
   objects: MapObject[];
   axisLabels: AxisLabels;
   selectedId: string;
   mode: TransformMode;
   onSelect: (id: string) => void;
   onChange: (id: string, patch: Partial<MapObject>) => void;
+  onDragging: (dragging: boolean) => void;
+  dragging: boolean;
+  editable: boolean;
+  onAxisSave: (axis: keyof AxisLabels, value: string) => void;
 }) {
   return <>
     <color attach="background" args={["#101916"]} /><fog attach="fog" args={["#101916", 18, 36]} />
@@ -149,11 +217,11 @@ function MappingScene({ objects, axisLabels, selectedId, mode, onSelect, onChang
     <ambientLight intensity={0.85} /><directionalLight position={[8, 12, 10]} intensity={2.2} color="#fff8e7" /><directionalLight position={[-8, 3, -6]} intensity={0.8} color="#b8d8cb" />
     <gridHelper args={[24, 24, "#446158", "#263b35"]} position={[0, -5.5, 0]} /><axesHelper args={[7]} />
     <mesh><sphereGeometry args={[0.13, 24, 24]} /><meshBasicMaterial color="#f0eadc" /></mesh>
-    <AxisLabel position={[7.7, 0, 0]} label={`X  ·  ${axisLabels.x}`} tone="#e58c7a" />
-    <AxisLabel position={[0, 7.7, 0]} label={`Y  ·  ${axisLabels.y}`} tone="#8ebc88" />
-    <AxisLabel position={[0, 0, 7.7]} label={`Z  ·  ${axisLabels.z}`} tone="#7ea9d6" />
-    {objects.map((object) => <ObjectMesh key={object.id} object={object} selected={object.id === selectedId} mode={mode} onSelect={() => onSelect(object.id)} onTransform={(patch) => onChange(object.id, patch)} />)}
-    <OrbitControls makeDefault enableDamping dampingFactor={0.08} minDistance={7} maxDistance={32} target={[0, 0, 0]} />
+    <AxisLabel position={[7.7, 0, 0]} label={`X  ·  ${axisLabels.x}`} tone="#e58c7a" editable={editable} onSave={(value) => onAxisSave("x", value.replace(/^X\s*·\s*/, ""))} />
+    <AxisLabel position={[0, 7.7, 0]} label={`Y  ·  ${axisLabels.y}`} tone="#8ebc88" editable={editable} onSave={(value) => onAxisSave("y", value.replace(/^Y\s*·\s*/, ""))} />
+    <AxisLabel position={[0, 0, 7.7]} label={`Z  ·  ${axisLabels.z}`} tone="#7ea9d6" editable={editable} onSave={(value) => onAxisSave("z", value.replace(/^Z\s*·\s*/, ""))} />
+    {objects.map((object) => <ObjectMesh key={object.id} object={object} selected={object.id === selectedId} mode={mode} onSelect={() => onSelect(object.id)} onTransform={(patch) => onChange(object.id, patch)} onDragging={onDragging} />)}
+    <OrbitControls makeDefault enabled={!dragging} enableDamping dampingFactor={0.08} minDistance={7} maxDistance={32} target={[0, 0, 0]} />
   </>;
 }
 
@@ -171,6 +239,8 @@ export function CognitiveMap() {
   const [activeViewId, setActiveViewId] = useState("default");
   const [selectedId, setSelectedId] = useState("embodied-placement");
   const [mode, setMode] = useState<TransformMode>("translate");
+  const [draggingObject, setDraggingObject] = useState(false);
+  const [showCustomColor, setShowCustomColor] = useState(false);
   const [saved, setSaved] = useState(false);
   const [roomId, setRoomId] = useState(() => typeof window === "undefined" ? "demo-room" : window.location.pathname.match(/^\/room\/([^/]+)/)?.[1] ?? "demo-room");
   const [syncState, setSyncState] = useState<"local" | "loading" | "online" | "error">(supabase ? "loading" : "local");
@@ -179,6 +249,8 @@ export function CognitiveMap() {
   const presenceKey = useRef(`guest-${crypto.randomUUID().slice(0, 8)}`);
   const importRef = useRef<HTMLInputElement>(null);
   const activeView = views.find((view) => view.id === activeViewId) ?? views[0];
+  const palette = activeView.palette ?? defaultPalette;
+  const categories = activeView.categories ?? defaultCategories;
   const objects = activeView.objects;
   const selected = objects.find((object) => object.id === selectedId) ?? null;
   const editView = (change: (view: MapView) => MapView) => setViews((items) => items.map((view) => view.id === activeViewId ? { ...change(view), updatedAt: new Date().toISOString() } : view));
@@ -296,21 +368,22 @@ export function CognitiveMap() {
     <nav className="viewbar" aria-label="Researcher views"><span className="eyebrow">Views</span><div className="viewtabs">{views.map((view) => <button key={view.id} className={view.id === activeViewId ? "active" : ""} onClick={() => { setActiveViewId(view.id); setSelectedId(""); }}>{view.name}{view.readOnly && <small> read only</small>}</button>)}<button className="add-view" onClick={newView}>+</button></div><div className="view-actions"><button onClick={renameView} disabled={activeView.readOnly}>Rename</button><button onClick={duplicateView}>Duplicate</button><button onClick={() => void saveViews()}>{saved ? "Saved" : "Save"}</button><button onClick={exportView}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={deleteView}>Delete</button><input ref={importRef} hidden type="file" accept="application/json" onChange={(e) => void importView(e.target.files?.[0])} /></div></nav>
     <section className="workspace">
       <div className="viewport" aria-label="Interactive three-dimensional concept map">
-        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName} · {collaborators} online</span><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
-        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => setSelectedId("")}><MappingScene objects={objects} axisLabels={activeView.axisLabels} selectedId={activeView.readOnly ? "" : selectedId} mode={mode} onSelect={setSelectedId} onChange={update} /></Canvas>
-        <div className="control-hint"><span><b>Drag space</b> rotate</span><span><b>Drag gizmo</b> {mode}</span><span><b>Scroll</b> zoom</span></div>
+        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName} · {collaborators} online</span><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button><button disabled title="Coming in Ver.2.1">Connect</button></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
+        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => setSelectedId("")}><MappingScene objects={objects} axisLabels={activeView.axisLabels} selectedId={activeView.readOnly ? "" : selectedId} mode={mode} onSelect={setSelectedId} onChange={update} onDragging={setDraggingObject} dragging={draggingObject} editable={!activeView.readOnly} onAxisSave={(axis, value) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [axis]: value } }))} /></Canvas>
+        <div className="control-hint"><span><b>Drag sphere</b> screen plane</span><span><b>Shift + drag</b> depth (Z)</span><span><b>Drag space</b> rotate</span></div>
       </div>
       <aside className="inspector">
         <div className="inspector-head"><span className="eyebrow">Object editor</span><span className="phase-badge">{activeView.readOnly ? "Read only" : "Edit mode"}</span></div>
         {selected ? <>
-          <div className="selection-title"><span className="color-chip" style={{ backgroundColor: selected.color }} /><div><input className="title-input" value={selected.name} onChange={(e) => update(selected.id, { name: e.target.value })} /><input className="category-input" value={selected.category} onChange={(e) => update(selected.id, { category: e.target.value })} /></div></div>
+          <div className="selection-title"><span className="color-chip" style={{ backgroundColor: selected.color }} /><div><input className="title-input" value={selected.name} onChange={(e) => update(selected.id, { name: e.target.value })} /><select className="category-input" value={selected.categoryId ?? "other"} onChange={(e) => { const category = categories.find((item) => item.id === e.target.value); const color = palette.find((item) => item.id === category?.defaultColorId); if (category && color) update(selected.id, { categoryId: category.id, category: category.name, colorId: color.id, customColor: undefined, color: color.hex }); }}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></div></div>
           <section className="editor-section"><h3>Position</h3><div className="number-row">{(["x", "y", "z"] as const).map((axis) => <label key={axis}><span>{axis.toUpperCase()}</span><input type="number" step="0.1" value={Number(selected[axis].toFixed(2))} onChange={(e) => update(selected.id, { [axis]: Number(e.target.value) })} /></label>)}</div><button className="text-button" onClick={() => update(selected.id, { x: 0, y: 0, z: 0 })}>Reset position</button></section>
           <section className="editor-section"><h3>Shape · sphere</h3><RangeField label="Scale X" value={selected.scaleX} min={0.1} max={3} step={0.05} onChange={(scaleX) => update(selected.id, { scaleX })} /><RangeField label="Scale Y" value={selected.scaleY} min={0.1} max={3} step={0.05} onChange={(scaleY) => update(selected.id, { scaleY })} /><RangeField label="Scale Z" value={selected.scaleZ} min={0.1} max={3} step={0.05} onChange={(scaleZ) => update(selected.id, { scaleZ })} /><RangeField label="Base size" value={selected.size} min={0.2} max={2} step={0.05} onChange={(size) => update(selected.id, { size })} /></section>
-          <section className="editor-section"><h3>Appearance</h3><label className="color-field"><span>Color</span><input type="color" value={selected.color} onChange={(e) => update(selected.id, { color: e.target.value })} /><code>{selected.color}</code></label><RangeField label="Opacity" value={selected.opacity} min={0.05} max={1} step={0.05} onChange={(opacity) => update(selected.id, { opacity })} /></section>
+          <section className="editor-section"><h3>Categorical color</h3><div className="color-swatches">{palette.map((color) => <button key={color.id} type="button" aria-label={color.name} title={color.name} className={selected.colorId === color.id && !selected.customColor ? "selected" : ""} style={{ backgroundColor: color.hex }} onClick={() => update(selected.id, { color: color.hex, colorId: color.id, customColor: undefined })} />)}</div><button className="text-button" onClick={() => setShowCustomColor((value) => !value)}>Custom color…</button>{showCustomColor && <label className="custom-color"><input type="color" value={selected.customColor ?? selected.color} onChange={(e) => update(selected.id, { color: e.target.value, customColor: e.target.value, colorId: undefined })} /><code>{selected.customColor ?? selected.color}</code></label>}<RangeField label="Opacity" value={selected.opacity} min={0.05} max={1} step={0.05} onChange={(opacity) => update(selected.id, { opacity })} /></section>
           <section className="editor-section"><h3>Description</h3><textarea value={selected.description} onChange={(e) => update(selected.id, { description: e.target.value })} rows={3} /></section>
           <div className="object-actions"><button onClick={duplicate}>Duplicate</button><button className="danger" onClick={remove}>Delete</button></div>
         </> : <div className="empty-selection"><span className="empty-orbit" /><h2>No object selected</h2><p>Select a sphere to edit its position and form.</p></div>}
         <section className="editor-section axis-editor"><h3>Axis labels</h3>{(["x", "y", "z"] as const).map((axis) => <label key={axis}><span>{axis.toUpperCase()}</span><input disabled={activeView.readOnly} value={activeView.axisLabels[axis]} onChange={(e) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [axis]: e.target.value } }))} /></label>)}</section>
+        <details className="palette-editor"><summary>Category palette</summary>{categories.map((category) => <label key={category.id}><span>{category.name}</span><select disabled={activeView.readOnly} value={category.defaultColorId} onChange={(e) => editView((view) => ({ ...view, palette, categories: categories.map((item) => item.id === category.id ? { ...item, defaultColorId: e.target.value } : item) }))}>{palette.map((color) => <option key={color.id} value={color.id}>{color.name}</option>)}</select></label>)}</details>
         {!activeView.readOnly && <button className="primary-button" onClick={addObject}>+ Add object</button>}
       </aside>
     </section>
