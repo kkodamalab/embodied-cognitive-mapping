@@ -34,7 +34,12 @@ type ViewObject = {
 
 type MapObject = Concept & ViewObject;
 type TransformMode = "translate" | "scale";
-type AxisLabels = { x: string; y: string; z: string };
+type AxisLabels = {
+  xNegative: string; xPositive: string;
+  yNegative: string; yPositive: string;
+  zNegative: string; zPositive: string;
+};
+type LegacyAxisLabels = Partial<AxisLabels> & { x?: string; y?: string; z?: string };
 type PaletteColor = { id: string; name: string; hex: string };
 type CategoryDefinition = { id: string; name: string; defaultColorId: string };
 type MapView = {
@@ -74,11 +79,29 @@ const initialObjects: MapObject[] = [
   colorId: undefined, customColor: String(color),
 }));
 
-const axisLabels = {
-  x: "Reductionist  ←  Systemic / Self-organizing",
-  y: "Situated / Sensorimotor  ←  Abstract / Decoupled",
-  z: "Individual  ←  Body  ←  Environment  ←  Social / Cultural",
+const axisLabels: AxisLabels = {
+  xNegative: "Reductionist", xPositive: "Systemic / Self-organizing",
+  yNegative: "Situated / Sensorimotor", yPositive: "Abstract / Decoupled",
+  zNegative: "Individual", zPositive: "Social / Cultural",
 };
+
+const splitLegacyAxis = (value: string | undefined, fallbackNegative: string, fallbackPositive: string) => {
+  const parts = value?.split(/[←↔→]/).map((part) => part.trim()).filter(Boolean) ?? [];
+  return { negative: parts[0] ?? fallbackNegative, positive: parts.at(-1) ?? fallbackPositive };
+};
+
+const normalizeAxisLabels = (labels: LegacyAxisLabels | undefined): AxisLabels => {
+  const x = splitLegacyAxis(labels?.x, axisLabels.xNegative, axisLabels.xPositive);
+  const y = splitLegacyAxis(labels?.y, axisLabels.yNegative, axisLabels.yPositive);
+  const z = splitLegacyAxis(labels?.z, axisLabels.zNegative, axisLabels.zPositive);
+  return {
+    xNegative: labels?.xNegative ?? x.negative, xPositive: labels?.xPositive ?? x.positive,
+    yNegative: labels?.yNegative ?? y.negative, yPositive: labels?.yPositive ?? y.positive,
+    zNegative: labels?.zNegative ?? z.negative, zPositive: labels?.zPositive ?? z.positive,
+  };
+};
+
+const normalizeViewAxisLabels = (view: MapView): MapView => ({ ...view, axisLabels: normalizeAxisLabels(view.axisLabels as LegacyAxisLabels) });
 
 const defaultPalette: PaletteColor[] = [
   { id: "red", name: "Red", hex: "#e06c68" }, { id: "orange", name: "Orange", hex: "#df9562" },
@@ -217,9 +240,12 @@ function MappingScene({ objects, axisLabels, selectedId, mode, onSelect, onChang
     <ambientLight intensity={0.85} /><directionalLight position={[8, 12, 10]} intensity={2.2} color="#fff8e7" /><directionalLight position={[-8, 3, -6]} intensity={0.8} color="#b8d8cb" />
     <gridHelper args={[24, 24, "#446158", "#263b35"]} position={[0, -5.5, 0]} /><axesHelper args={[7]} />
     <mesh><sphereGeometry args={[0.13, 24, 24]} /><meshBasicMaterial color="#f0eadc" /></mesh>
-    <AxisLabel position={[7.7, 0, 0]} label={`X  ·  ${axisLabels.x}`} tone="#e58c7a" editable={editable} onSave={(value) => onAxisSave("x", value.replace(/^X\s*·\s*/, ""))} />
-    <AxisLabel position={[0, 7.7, 0]} label={`Y  ·  ${axisLabels.y}`} tone="#8ebc88" editable={editable} onSave={(value) => onAxisSave("y", value.replace(/^Y\s*·\s*/, ""))} />
-    <AxisLabel position={[0, 0, 7.7]} label={`Z  ·  ${axisLabels.z}`} tone="#7ea9d6" editable={editable} onSave={(value) => onAxisSave("z", value.replace(/^Z\s*·\s*/, ""))} />
+    <AxisLabel position={[-7.7, 0, 0]} label={`−X · ${axisLabels.xNegative}`} tone="#e58c7a" editable={editable} onSave={(value) => onAxisSave("xNegative", value.replace(/^−?X\s*·\s*/, ""))} />
+    <AxisLabel position={[7.7, 0, 0]} label={`+X · ${axisLabels.xPositive}`} tone="#e58c7a" editable={editable} onSave={(value) => onAxisSave("xPositive", value.replace(/^\+?X\s*·\s*/, ""))} />
+    <AxisLabel position={[0, -4.8, 0]} label={`−Y · ${axisLabels.yNegative}`} tone="#8ebc88" editable={editable} onSave={(value) => onAxisSave("yNegative", value.replace(/^−?Y\s*·\s*/, ""))} />
+    <AxisLabel position={[0, 7.7, 0]} label={`+Y · ${axisLabels.yPositive}`} tone="#8ebc88" editable={editable} onSave={(value) => onAxisSave("yPositive", value.replace(/^\+?Y\s*·\s*/, ""))} />
+    <AxisLabel position={[0, 0, -7.7]} label={`−Z · ${axisLabels.zNegative}`} tone="#7ea9d6" editable={editable} onSave={(value) => onAxisSave("zNegative", value.replace(/^−?Z\s*·\s*/, ""))} />
+    <AxisLabel position={[0, 0, 7.7]} label={`+Z · ${axisLabels.zPositive}`} tone="#7ea9d6" editable={editable} onSave={(value) => onAxisSave("zPositive", value.replace(/^\+?Z\s*·\s*/, ""))} />
     {objects.map((object) => <ObjectMesh key={object.id} object={object} selected={object.id === selectedId} mode={mode} onSelect={() => onSelect(object.id)} onTransform={(patch) => onChange(object.id, patch)} onDragging={onDragging} />)}
     <OrbitControls makeDefault enabled={!dragging} enableDamping dampingFactor={0.08} minDistance={7} maxDistance={32} target={[0, 0, 0]} />
   </>;
@@ -234,7 +260,7 @@ export function CognitiveMap() {
     if (typeof window === "undefined") return starterViews;
     const raw = window.localStorage.getItem("ecm-views-v2");
     if (!raw) return starterViews;
-    try { const restored = JSON.parse(raw) as MapView[]; return Array.isArray(restored) && restored.length ? restored : starterViews; } catch { return starterViews; }
+    try { const restored = JSON.parse(raw) as MapView[]; return Array.isArray(restored) && restored.length ? restored.map(normalizeViewAxisLabels) : starterViews; } catch { return starterViews; }
   });
   const [activeViewId, setActiveViewId] = useState("default");
   const [selectedId, setSelectedId] = useState("embodied-placement");
@@ -266,7 +292,7 @@ export function CognitiveMap() {
       if (cancelled) return;
       if (error) { setSyncState("error"); return; }
       const remote = (data ?? []).map((row) => row.data as MapView);
-      if (remote.length) { setViews(remote); setActiveViewId(remote[0].id); }
+      if (remote.length) { const normalized = remote.map(normalizeViewAxisLabels); setViews(normalized); setActiveViewId(normalized[0].id); }
       setSyncState("online");
     });
     return () => { cancelled = true; };
@@ -281,7 +307,7 @@ export function CognitiveMap() {
         const remote = record.data;
         if (!remote || remote.id !== activeViewId) return;
         applyingRemote.current = true;
-        setViews((items) => items.map((view) => view.id === remote.id ? remote : view));
+        setViews((items) => items.map((view) => view.id === remote.id ? normalizeViewAxisLabels(remote) : view));
       })
       .on("presence", { event: "sync" }, () => {
         setCollaborators(Object.keys(channel.presenceState()).length || 1);
@@ -382,7 +408,7 @@ export function CognitiveMap() {
           <section className="editor-section"><h3>Description</h3><textarea value={selected.description} onChange={(e) => update(selected.id, { description: e.target.value })} rows={3} /></section>
           <div className="object-actions"><button onClick={duplicate}>Duplicate</button><button className="danger" onClick={remove}>Delete</button></div>
         </> : <div className="empty-selection"><span className="empty-orbit" /><h2>No object selected</h2><p>Select a sphere to edit its position and form.</p></div>}
-        <section className="editor-section axis-editor"><h3>Axis labels</h3>{(["x", "y", "z"] as const).map((axis) => <label key={axis}><span>{axis.toUpperCase()}</span><input disabled={activeView.readOnly} value={activeView.axisLabels[axis]} onChange={(e) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [axis]: e.target.value } }))} /></label>)}</section>
+        <section className="editor-section axis-editor"><h3>Axis labels</h3>{(["x", "y", "z"] as const).map((axis) => <div className="axis-pair" key={axis}><strong>{axis.toUpperCase()} axis</strong><label><span>− end</span><input disabled={activeView.readOnly} value={activeView.axisLabels[`${axis}Negative`]} onChange={(e) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [`${axis}Negative`]: e.target.value } }))} /></label><label><span>+ end</span><input disabled={activeView.readOnly} value={activeView.axisLabels[`${axis}Positive`]} onChange={(e) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [`${axis}Positive`]: e.target.value } }))} /></label></div>)}</section>
         <details className="palette-editor"><summary>Category palette</summary>{categories.map((category) => <label key={category.id}><span>{category.name}</span><select disabled={activeView.readOnly} value={category.defaultColorId} onChange={(e) => editView((view) => ({ ...view, palette, categories: categories.map((item) => item.id === category.id ? { ...item, defaultColorId: e.target.value } : item) }))}>{palette.map((color) => <option key={color.id} value={color.id}>{color.name}</option>)}</select></label>)}</details>
         {!activeView.readOnly && <button className="primary-button" onClick={addObject}>+ Add object</button>}
       </aside>
