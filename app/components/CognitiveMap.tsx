@@ -1,6 +1,6 @@
 "use client";
 
-import { Html, Line, OrbitControls, PerspectiveCamera, TransformControls } from "@react-three/drei";
+import { Html, Line, OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
 import { Plane, Vector3, type Group } from "three";
@@ -39,7 +39,6 @@ type ViewObject = {
 };
 
 type MapObject = Concept & ViewObject;
-type TransformMode = "translate" | "scale" | "connect";
 type PlaneView = "3d" | "xy" | "yz" | "xz";
 type AxisLabels = {
   xNegative: string; xPositive: string;
@@ -182,10 +181,9 @@ function ThinkerCard({ concept, onClose }: { concept: MapObject; onClose: () => 
   return <Html position={[0, concept.size + 1.4, 0]} center distanceFactor={10} style={{ pointerEvents: "auto" }}><article className="thinker-card"><button className="card-close" onClick={onClose}>×</button><small>{concept.name}</small><div className="thinker-head">{thinker.imageUrl ? <img src={thinker.imageUrl} alt={thinker.name} /> : <span className="thinker-placeholder">{thinker.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}<div><strong>{thinker.name}</strong><span>{thinker.years}</span><em>{thinker.role}</em></div></div><h4>Core Message</h4><p>{more ? thinker.coreMessage : thinker.coreMessage.slice(0, 180)}</p>{thinker.references?.length ? <><h4>Key references</h4><ul>{thinker.references.slice(0, 3).map((reference) => <li key={reference}>{reference}</li>)}</ul></> : null}<div className="card-actions"><button disabled={thinkers.length < 2} onClick={() => setIndex((value) => (value - 1 + thinkers.length) % thinkers.length)}>‹</button><button disabled={thinkers.length < 2} onClick={() => setIndex((value) => (value + 1) % thinkers.length)}>›</button><button onClick={() => setMore((value) => !value)}>{more ? "Less" : "More"}</button><button onClick={onClose}>Close</button></div></article></Html>;
 }
 
-function ObjectMesh({ object, selected, mode, layerOpacity, thinkerOpen, onSelect, onOpenThinker, onTransform, onDragging }: {
+function ObjectMesh({ object, selected, layerOpacity, thinkerOpen, onSelect, onOpenThinker, onTransform, onDragging }: {
   object: MapObject;
   selected: boolean;
-  mode: TransformMode;
   layerOpacity: number;
   thinkerOpen: boolean;
   onSelect: (additive: boolean) => void;
@@ -203,7 +201,7 @@ function ObjectMesh({ object, selected, mode, layerOpacity, thinkerOpen, onSelec
   const startZ = useRef(0);
   const moved = useRef(false);
   const beginDrag = (event: ThreeEvent<PointerEvent>) => {
-    if (mode !== "translate") return;
+    if (event.nativeEvent.ctrlKey || event.nativeEvent.metaKey) return;
     event.stopPropagation(); onSelect(event.nativeEvent.shiftKey || event.nativeEvent.ctrlKey || event.nativeEvent.metaKey); moved.current = false; dragging.current = true; onDragging(true);
     startClientY.current = event.nativeEvent.clientY; startZ.current = object.z;
     const normal = camera.getWorldDirection(new Vector3());
@@ -225,7 +223,7 @@ function ObjectMesh({ object, selected, mode, layerOpacity, thinkerOpen, onSelec
   };
   const body = (
     <group ref={group} position={[object.x, object.y, object.z]} scale={[object.scaleX, object.scaleY, object.scaleZ]}>
-      <mesh onClick={(event) => { event.stopPropagation(); onSelect(event.nativeEvent.shiftKey || event.nativeEvent.ctrlKey || event.nativeEvent.metaKey); }} onDoubleClick={(event) => { event.stopPropagation(); if (!moved.current && mode !== "connect") onOpenThinker(); moved.current = false; }} onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerOver={() => { if (mode === "translate") document.body.style.cursor = "grab"; }} onPointerOut={() => { if (!dragging.current) document.body.style.cursor = "auto"; }} renderOrder={object.opacity * layerOpacity < 1 ? 2 : 0}>
+      <mesh onClick={(event) => { event.stopPropagation(); onSelect(event.nativeEvent.ctrlKey || event.nativeEvent.metaKey); }} onDoubleClick={(event) => { event.stopPropagation(); if (!moved.current) onOpenThinker(); moved.current = false; }} onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerOver={() => { document.body.style.cursor = "grab"; }} onPointerOut={() => { if (!dragging.current) document.body.style.cursor = "auto"; }} renderOrder={object.opacity * layerOpacity < 1 ? 2 : 0}>
         <sphereGeometry args={[object.size, 40, 40]} />
         <meshStandardMaterial
           color={object.color}
@@ -246,26 +244,7 @@ function ObjectMesh({ object, selected, mode, layerOpacity, thinkerOpen, onSelec
     </group>
   );
 
-  if (!selected || mode === "connect") return body;
-  return (
-    <TransformControls
-      key={`${object.id}-${mode}`}
-      mode={mode === "scale" ? "scale" : "translate"}
-      enabled={mode === "scale" || mode === "translate"}
-      showX showY showZ
-      size={1.25}
-      onMouseDown={() => onDragging(true)}
-      onMouseUp={() => onDragging(false)}
-      onObjectChange={() => {
-        const node = group.current;
-        if (!node) return;
-        onTransform({
-          x: node.position.x, y: node.position.y, z: node.position.z,
-          scaleX: Math.max(0.1, node.scale.x), scaleY: Math.max(0.1, node.scale.y), scaleZ: Math.max(0.1, node.scale.z),
-        });
-      }}
-    >{body}</TransformControls>
-  );
+  return body;
 }
 
 function CameraPreset({ view }: { view: PlaneView }) {
@@ -282,13 +261,12 @@ function CameraPreset({ view }: { view: PlaneView }) {
   return null;
 }
 
-function MappingScene({ objects, connections, layers, axisLabels, selectedId, mode, planeView, thinkerObjectId, onSelect, onConnectSelect, onOpenThinker, onSelectConnection, onChange, onDragging, dragging, editable, onAxisSave }: {
+function MappingScene({ objects, connections, layers, axisLabels, selectedId, planeView, thinkerObjectId, onSelect, onConnectSelect, onOpenThinker, onSelectConnection, onChange, onDragging, dragging, editable, onAxisSave }: {
   objects: MapObject[];
   connections: Connection[];
   layers: LayerDefinition[];
   axisLabels: AxisLabels;
   selectedId: string;
-  mode: TransformMode;
   planeView: PlaneView;
   thinkerObjectId: string;
   onSelect: (id: string) => void;
@@ -317,7 +295,7 @@ function MappingScene({ objects, connections, layers, axisLabels, selectedId, mo
     <AxisLabel position={[0, 0, -7.7]} label={`−Z · ${axisLabels.zNegative}`} tone="#7ea9d6" editable={editable} onSave={(value) => onAxisSave("zNegative", value.replace(/^−?Z\s*·\s*/, ""))} />
     <AxisLabel position={[0, 0, 7.7]} label={`+Z · ${axisLabels.zPositive}`} tone="#7ea9d6" editable={editable} onSave={(value) => onAxisSave("zPositive", value.replace(/^\+?Z\s*·\s*/, ""))} />
     {connections.map((connection) => { const source = objects.find((object) => object.id === connection.sourceConceptId); const target = objects.find((object) => object.id === connection.targetConceptId); if (!source || !target || !layers.find((layer) => layer.id === source.layerId)?.visible || !layers.find((layer) => layer.id === target.layerId)?.visible) return null; return <Line key={connection.id} points={[[source.x, source.y, source.z], [target.x, target.y, target.z]]} color={connection.color ?? "#e7d48f"} lineWidth={connection.lineStyle === "dotted" ? 1 : 2} dashed={connection.lineStyle === "dashed" || connection.lineStyle === "dotted"} dashSize={connection.lineStyle === "dotted" ? 0.12 : 0.45} gapSize={connection.lineStyle === "dotted" ? 0.18 : 0.25} transparent opacity={connection.opacity ?? 0.85} onClick={(event) => { event.stopPropagation(); onSelectConnection(connection.id); }} />; })}
-    {objects.map((object) => { const layer = layers.find((item) => item.id === object.layerId); if (layer && !layer.visible) return null; return <ObjectMesh key={object.id} object={object} selected={object.id === selectedId} mode={mode} layerOpacity={layer?.opacity ?? 1} thinkerOpen={thinkerObjectId === object.id} onSelect={(additive) => mode === "connect" ? onConnectSelect(object.id, additive) : onSelect(object.id)} onOpenThinker={() => onOpenThinker(object.id)} onTransform={(patch) => onChange(object.id, patch)} onDragging={onDragging} />; })}
+    {objects.map((object) => { const layer = layers.find((item) => item.id === object.layerId); if (layer && !layer.visible) return null; return <ObjectMesh key={object.id} object={object} selected={object.id === selectedId} layerOpacity={layer?.opacity ?? 1} thinkerOpen={thinkerObjectId === object.id} onSelect={(additive) => additive ? onConnectSelect(object.id, true) : onSelect(object.id)} onOpenThinker={() => onOpenThinker(object.id)} onTransform={(patch) => onChange(object.id, patch)} onDragging={onDragging} />; })}
     <OrbitControls makeDefault enabled={!dragging} enableDamping dampingFactor={0.08} minDistance={7} maxDistance={32} target={[0, 0, 0]} />
   </>;
 }
@@ -335,13 +313,11 @@ export function CognitiveMap() {
   });
   const [activeViewId, setActiveViewId] = useState("default");
   const [selectedId, setSelectedId] = useState("embodied-placement");
-  const [mode, setMode] = useState<TransformMode>("translate");
   const [planeView, setPlaneView] = useState<PlaneView>("3d");
   const [draggingObject, setDraggingObject] = useState(false);
   const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
   const [thinkerObjectId, setThinkerObjectId] = useState("");
   const [connectionStartId, setConnectionStartId] = useState("");
-  const [pendingConnection, setPendingConnection] = useState<Connection | null>(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState("");
   const [showCustomColor, setShowCustomColor] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -396,12 +372,7 @@ export function CognitiveMap() {
     const now = new Date().toISOString();
     const connection: Connection = { id: crypto.randomUUID(), sourceConceptId: connectionStartId, targetConceptId: id, relationType: "similarity", label: `${source?.name ?? "Concept"} ↔ ${target?.name ?? "Concept"}`, description: "", dimensions: [{ id: crypto.randomUUID(), label: defaultDimensions[0], relation: "unknown" }], lineStyle: "solid", color: "#e7d48f", opacity: 0.85, createdAt: now, updatedAt: now };
     editView((view) => ({ ...view, connections: [...view.connections, connection] }));
-    setSelectedConnectionId(connection.id); setPendingConnection(null); setConnectionStartId(additive ? id : ""); setSelectedId(additive ? id : "");
-  };
-  const savePendingConnection = () => {
-    if (!pendingConnection || activeView.readOnly) return;
-    editView((view) => ({ ...view, connections: [...view.connections, pendingConnection] }));
-    setSelectedConnectionId(pendingConnection.id); setPendingConnection(null);
+    setSelectedConnectionId(connection.id); setConnectionStartId(additive ? id : ""); setSelectedId(additive ? id : "");
   };
   const updateLayer = (id: string, patch: Partial<LayerDefinition>) => {
     if (activeView.readOnly) return;
@@ -528,14 +499,14 @@ export function CognitiveMap() {
     <nav className="viewbar" aria-label="Researcher views"><span className="eyebrow">Views</span><div className="viewtabs">{views.map((view) => <button key={view.id} className={view.id === activeViewId ? "active" : ""} onClick={() => { setActiveViewId(view.id); setSelectedId(""); }}>{view.name}{view.readOnly && <small> read only</small>}</button>)}<button className="add-view" onClick={newView}>+</button></div><div className="view-actions"><button onClick={undo} disabled={!undoStack.length || activeView.readOnly} title="Undo (Ctrl+Z)">↶ Undo</button><button onClick={renameView} disabled={activeView.readOnly}>Rename</button><button onClick={duplicateView}>Duplicate</button><button onClick={() => void saveViews()}>{saved ? "Saved" : "Save"}</button><button onClick={exportView}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={deleteView}>Delete</button><input ref={importRef} hidden type="file" accept="application/json" onChange={(e) => void importView(e.target.files?.[0])} /></div></nav>
     <section className="workspace">
       <div className="viewport" aria-label="Interactive three-dimensional concept map">
-        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName} · {collaborators} online</span><div className="viewport-tools"><div className="tool-toggle"><button className={mode === "translate" ? "active" : ""} onClick={() => setMode("translate")}>Move</button><button className={mode === "scale" ? "active" : ""} onClick={() => setMode("scale")}>Shape</button><button className={mode === "connect" ? "active" : ""} disabled={activeView.readOnly} onClick={() => { setMode("connect"); setConnectionStartId(""); }}>Connect</button></div><div className="tool-toggle plane-toggle" aria-label="Camera view"><button className={planeView === "3d" ? "active" : ""} onClick={() => setPlaneView("3d")}>3D</button><button className={planeView === "xy" ? "active" : ""} onClick={() => setPlaneView("xy")}>XY</button><button className={planeView === "yz" ? "active" : ""} onClick={() => setPlaneView("yz")}>YZ</button><button className={planeView === "xz" ? "active" : ""} onClick={() => setPlaneView("xz")}>XZ</button></div></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
-        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => { setSelectedId(""); if (mode === "connect") setConnectionStartId(""); }}><MappingScene objects={objects} connections={connections} layers={layers} axisLabels={activeView.axisLabels} selectedId={activeView.readOnly ? "" : selectedId} mode={mode} planeView={planeView} thinkerObjectId={thinkerObjectId} onSelect={setSelectedId} onConnectSelect={selectForConnection} onOpenThinker={(id) => setThinkerObjectId((current) => current === id ? "" : id)} onSelectConnection={(id) => { setSelectedConnectionId(id); setPendingConnection(null); }} onChange={update} onDragging={setDraggingObject} dragging={draggingObject} editable={!activeView.readOnly} onAxisSave={(axis, value) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [axis]: value } }))} /></Canvas>
+        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName} · {collaborators} online</span><div className="viewport-tools"><div className="interaction-key"><b>Drag</b> Move <span>·</span> <b>Shift + drag</b> depth <span>·</span> <b>Ctrl/Cmd + click × 2</b> Connect</div><div className="tool-toggle plane-toggle" aria-label="Camera view"><button className={planeView === "3d" ? "active" : ""} onClick={() => setPlaneView("3d")}>3D</button><button className={planeView === "xy" ? "active" : ""} onClick={() => setPlaneView("xy")}>XY</button><button className={planeView === "yz" ? "active" : ""} onClick={() => setPlaneView("yz")}>YZ</button><button className={planeView === "xz" ? "active" : ""} onClick={() => setPlaneView("xz")}>XZ</button></div></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
+        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => { setSelectedId(""); setConnectionStartId(""); }}><MappingScene objects={objects} connections={connections} layers={layers} axisLabels={activeView.axisLabels} selectedId={activeView.readOnly ? "" : selectedId} planeView={planeView} thinkerObjectId={thinkerObjectId} onSelect={setSelectedId} onConnectSelect={selectForConnection} onOpenThinker={(id) => setThinkerObjectId((current) => current === id ? "" : id)} onSelectConnection={(id) => { setSelectedConnectionId(id); }} onChange={update} onDragging={setDraggingObject} dragging={draggingObject} editable={!activeView.readOnly} onAxisSave={(axis, value) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [axis]: value } }))} /></Canvas>
         <div className="layer-panel"><div><b>Layers</b><button disabled={activeView.readOnly} onClick={addLayer}>+ Add</button></div>{[...layers].sort((a, b) => a.order - b.order).map((layer) => <details key={layer.id}><summary><input type="checkbox" checked={layer.visible} disabled={activeView.readOnly} onChange={(e) => updateLayer(layer.id, { visible: e.target.checked })} onClick={(e) => e.stopPropagation()} /> {layer.name}</summary><label>Name<input disabled={activeView.readOnly} value={layer.name} onChange={(e) => updateLayer(layer.id, { name: e.target.value })} /></label><label>Description<input disabled={activeView.readOnly} value={layer.description ?? ""} onChange={(e) => updateLayer(layer.id, { description: e.target.value })} /></label><label>Opacity <input type="range" min="0.05" max="1" step="0.05" disabled={activeView.readOnly} value={layer.opacity ?? 1} onChange={(e) => updateLayer(layer.id, { opacity: Number(e.target.value) })} /></label><button disabled={activeView.readOnly || layers.length < 2} className="danger" onClick={() => removeLayer(layer.id)}>Delete layer</button></details>)}</div>
-        <div className="control-hint">{mode === "connect" ? <span><b>Connect:</b> {connectionStartId ? "choose a second sphere" : "choose two spheres"}</span> : <><span><b>Drag sphere</b> screen plane</span><span><b>Shift + drag</b> depth (Z)</span><span><b>Drag space</b> rotate</span></>}</div>
+        <div className="control-hint">{connectionStartId ? <span><b>Connect:</b> Ctrl/Cmd + click a second sphere</span> : <><span><b>Drag sphere</b> screen plane</span><span><b>Shift + drag</b> depth (Z)</span><span><b>Drag space</b> rotate</span></>}</div>
       </div>
       <aside className="inspector">
         <div className="inspector-head"><span className="eyebrow">Object editor</span><span className="phase-badge">{activeView.readOnly ? "Read only" : "Edit mode"}</span></div>
-        {(pendingConnection || selectedConnection) && (() => { const connection = pendingConnection ?? selectedConnection!; const source = objects.find((object) => object.id === connection.sourceConceptId); const target = objects.find((object) => object.id === connection.targetConceptId); const change = (patch: Partial<Connection>) => pendingConnection ? setPendingConnection({ ...connection, ...patch, updatedAt: new Date().toISOString() }) : updateConnection(connection.id, patch); return <section className="connection-editor"><div className="connection-title"><h3>{pendingConnection ? "New connection" : "Connection"}</h3><button onClick={() => { setPendingConnection(null); setSelectedConnectionId(""); }}>×</button></div><p>{source?.name ?? "Unknown"} <b>↔</b> {target?.name ?? "Unknown"}</p><label>Relation<select disabled={activeView.readOnly} value={connection.relationType} onChange={(e) => { const relationType = e.target.value as Connection["relationType"]; change({ relationType, lineStyle: relationType === "difference" || relationType === "historical" ? "dashed" : relationType === "criticism" ? "dotted" : "solid" }); }}>{["similarity", "difference", "influence", "criticism", "historical", "compatibility", "other"].map((type) => <option key={type}>{type}</option>)}</select></label><label>Label<input disabled={activeView.readOnly} value={connection.label} onChange={(e) => change({ label: e.target.value })} /></label><label>Description<textarea disabled={activeView.readOnly} rows={2} value={connection.description ?? ""} onChange={(e) => change({ description: e.target.value })} /></label><h4>Comparison dimensions</h4>{connection.dimensions.map((dimension) => <div className="dimension-row" key={dimension.id}><input disabled={activeView.readOnly} value={dimension.label} onChange={(e) => change({ dimensions: connection.dimensions.map((item) => item.id === dimension.id ? { ...item, label: e.target.value } : item) })} /><select disabled={activeView.readOnly} value={dimension.relation ?? "unknown"} onChange={(e) => change({ dimensions: connection.dimensions.map((item) => item.id === dimension.id ? { ...item, relation: e.target.value as ComparisonDimension["relation"] } : item) })}>{["same", "similar", "different", "debated", "unknown"].map((relation) => <option key={relation}>{relation}</option>)}</select><button disabled={activeView.readOnly} onClick={() => change({ dimensions: connection.dimensions.filter((item) => item.id !== dimension.id) })}>−</button></div>)}<button disabled={activeView.readOnly} onClick={() => change({ dimensions: [...connection.dimensions, { id: crypto.randomUUID(), label: defaultDimensions[0], relation: "unknown" }] })}>+ Dimension</button><div className="connection-actions">{pendingConnection ? <><button onClick={() => setPendingConnection(null)}>Cancel</button><button className="primary-button" onClick={savePendingConnection}>Save connection</button></> : <button className="danger" disabled={activeView.readOnly} onClick={() => { editView((view) => ({ ...view, connections: view.connections.filter((item) => item.id !== connection.id) })); setSelectedConnectionId(""); }}>Delete connection</button>}</div></section>; })()}
+        {selectedConnection && (() => { const connection = selectedConnection; const source = objects.find((object) => object.id === connection.sourceConceptId); const target = objects.find((object) => object.id === connection.targetConceptId); const change = (patch: Partial<Connection>) => updateConnection(connection.id, patch); return <section className="connection-editor"><div className="connection-title"><h3>Connection</h3><button onClick={() => setSelectedConnectionId("")}>×</button></div><p>{source?.name ?? "Unknown"} <b>↔</b> {target?.name ?? "Unknown"}</p><label>Relation<select disabled={activeView.readOnly} value={connection.relationType} onChange={(e) => { const relationType = e.target.value as Connection["relationType"]; change({ relationType, lineStyle: relationType === "difference" || relationType === "historical" ? "dashed" : relationType === "criticism" ? "dotted" : "solid" }); }}>{["similarity", "difference", "influence", "criticism", "historical", "compatibility", "other"].map((type) => <option key={type}>{type}</option>)}</select></label><label>Label<input disabled={activeView.readOnly} value={connection.label} onChange={(e) => change({ label: e.target.value })} /></label><label>Description<textarea disabled={activeView.readOnly} rows={2} value={connection.description ?? ""} onChange={(e) => change({ description: e.target.value })} /></label><h4>Comparison dimensions</h4>{connection.dimensions.map((dimension) => <div className="dimension-row" key={dimension.id}><input disabled={activeView.readOnly} value={dimension.label} onChange={(e) => change({ dimensions: connection.dimensions.map((item) => item.id === dimension.id ? { ...item, label: e.target.value } : item) })} /><select disabled={activeView.readOnly} value={dimension.relation ?? "unknown"} onChange={(e) => change({ dimensions: connection.dimensions.map((item) => item.id === dimension.id ? { ...item, relation: e.target.value as ComparisonDimension["relation"] } : item) })}>{["same", "similar", "different", "debated", "unknown"].map((relation) => <option key={relation}>{relation}</option>)}</select><button disabled={activeView.readOnly} onClick={() => change({ dimensions: connection.dimensions.filter((item) => item.id !== dimension.id) })}>−</button></div>)}<button disabled={activeView.readOnly} onClick={() => change({ dimensions: [...connection.dimensions, { id: crypto.randomUUID(), label: defaultDimensions[0], relation: "unknown" }] })}>+ Dimension</button><div className="connection-actions"><button className="danger" disabled={activeView.readOnly} onClick={() => { editView((view) => ({ ...view, connections: view.connections.filter((item) => item.id !== connection.id) })); setSelectedConnectionId(""); }}>Delete connection</button></div></section>; })()}
         {selected ? <>
           <div className="selection-title"><span className="color-chip" style={{ backgroundColor: selected.color }} /><div><input className="title-input" value={selected.name} onChange={(e) => update(selected.id, { name: e.target.value })} /><select className="category-input" value={selected.categoryId ?? "other"} onChange={(e) => { const category = categories.find((item) => item.id === e.target.value); const color = palette.find((item) => item.id === category?.defaultColorId); if (category && color) update(selected.id, { categoryId: category.id, category: category.name, colorId: color.id, customColor: undefined, color: color.hex }); }}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><select className="category-input" value={selected.layerId ?? layers[0]?.id} onChange={(e) => update(selected.id, { layerId: e.target.value })}>{layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.name}</option>)}</select></div></div>
           <section className="editor-section"><h3>Position</h3><div className="number-row">{(["x", "y", "z"] as const).map((axis) => <label key={axis}><span>{axis.toUpperCase()}</span><input type="number" step="0.1" value={Number(selected[axis].toFixed(2))} onChange={(e) => update(selected.id, { [axis]: Number(e.target.value) })} /></label>)}</div><button className="text-button" onClick={() => update(selected.id, { x: 0, y: 0, z: 0 })}>Reset position</button></section>

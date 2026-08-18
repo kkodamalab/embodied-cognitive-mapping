@@ -37,6 +37,8 @@ button, input, textarea { font: inherit; }
 .viewport::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 90px rgba(0,0,0,.35); }
 .viewport-meta { position: absolute; top: 20px; left: 22px; right: 22px; display: flex; justify-content: space-between; z-index: 2; pointer-events: none; }
 .viewport-tools { display: flex; gap: 7px; }
+.interaction-key { align-self: center; padding: 6px 9px; border: 1px solid #385047; border-radius: 5px; color: #91a39a; background: #14211c; font: 9px var(--font-geist-mono), monospace; pointer-events: none; white-space: nowrap; }
+.interaction-key b { color: #d9c176; font-weight: 600; }.interaction-key span { color: #51655c; margin: 0 3px; }
 .plane-toggle button { min-width: 29px; font-family: var(--font-geist-mono), monospace; }
 .eyebrow { color: #86978f; text-transform: uppercase; letter-spacing: .15em; font: 600 10px var(--font-geist-mono), monospace; }
 .object-count { color: #8da098; font: 11px var(--font-geist-mono), monospace; }
