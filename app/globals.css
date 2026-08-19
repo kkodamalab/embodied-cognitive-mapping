@@ -51,6 +51,8 @@ button, input, textarea { font: inherit; }
 
 .concept-label { display: block; padding: 5px 8px; border-radius: 4px; color: #d8dfdb; background: rgba(15,24,21,.82); border: 1px solid rgba(93,117,106,.55); white-space: nowrap; font: 11px var(--font-geist-sans), sans-serif; box-shadow: 0 5px 16px rgba(0,0,0,.25); }
 .concept-label.selected { color: #fff7df; border-color: #dbc27d; background: rgba(45,43,31,.9); }
+.connection-label { display: -webkit-box; max-width: 210px; overflow: hidden; padding: 4px 7px; border: 1px solid #8a7c4c; border-radius: 4px; color: #f0e7bf; background: rgba(20,28,24,.9); font: 10px/1.35 var(--font-geist-mono), monospace; text-align: center; white-space: pre-line; -webkit-box-orient: vertical; -webkit-line-clamp: 3; cursor: pointer; }
+.connection-label.selected { border-color: #fff1ad; box-shadow: 0 0 0 1px rgba(255,241,173,.45); background: rgba(60,53,27,.95); }.connection-label textarea { display: block; width: 205px; border: 1px solid #e5ca76; border-radius: 3px; outline: 0; color: #f3edda; background: #18221d; font: inherit; resize: vertical; }
 .axis-label { display: block; width: max-content; max-width: 230px; padding: 4px 6px; background: rgba(12,20,17,.65); font: 600 9px/1.35 var(--font-geist-mono), monospace; letter-spacing: .03em; text-align: center; }
 .axis-label.editable { cursor: text; transition: background .15s, box-shadow .15s; }
 .axis-label.editable:hover { background: rgba(48,64,56,.95); box-shadow: 0 0 0 1px #7f968b; }

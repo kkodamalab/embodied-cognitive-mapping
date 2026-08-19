@@ -181,9 +181,19 @@ function ThinkerCard({ concept, onClose }: { concept: MapObject; onClose: () => 
   return <Html position={[0, concept.size + 1.4, 0]} center distanceFactor={10} style={{ pointerEvents: "auto" }}><article className="thinker-card"><button className="card-close" onClick={onClose}>×</button><small>{concept.name}</small><div className="thinker-head">{thinker.imageUrl ? <img src={thinker.imageUrl} alt={thinker.name} /> : <span className="thinker-placeholder">{thinker.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}<div><strong>{thinker.name}</strong><span>{thinker.years}</span><em>{thinker.role}</em></div></div><h4>Core Message</h4><p>{more ? thinker.coreMessage : thinker.coreMessage.slice(0, 180)}</p>{thinker.references?.length ? <><h4>Key references</h4><ul>{thinker.references.slice(0, 3).map((reference) => <li key={reference}>{reference}</li>)}</ul></> : null}<div className="card-actions"><button disabled={thinkers.length < 2} onClick={() => setIndex((value) => (value - 1 + thinkers.length) % thinkers.length)}>‹</button><button disabled={thinkers.length < 2} onClick={() => setIndex((value) => (value + 1) % thinkers.length)}>›</button><button onClick={() => setMore((value) => !value)}>{more ? "Less" : "More"}</button><button onClick={onClose}>Close</button></div></article></Html>;
 }
 
-function ObjectMesh({ object, selected, layerOpacity, thinkerOpen, onSelect, onOpenThinker, onTransform, onDragging }: {
+function ScaleHandle({ axis, position, color, onScale, onDragging }: { axis: "x" | "y" | "z"; position: [number, number, number]; color: string; onScale: (amount: number) => void; onDragging: (dragging: boolean) => void }) {
+  const active = useRef(false);
+  const lastX = useRef(0); const lastY = useRef(0);
+  const begin = (event: ThreeEvent<PointerEvent>) => { event.stopPropagation(); active.current = true; lastX.current = event.nativeEvent.clientX; lastY.current = event.nativeEvent.clientY; (event.target as Element).setPointerCapture(event.pointerId); onDragging(true); document.body.style.cursor = "ew-resize"; };
+  const move = (event: ThreeEvent<PointerEvent>) => { if (!active.current) return; event.stopPropagation(); const delta = axis === "y" ? lastY.current - event.nativeEvent.clientY : event.nativeEvent.clientX - lastX.current; lastX.current = event.nativeEvent.clientX; lastY.current = event.nativeEvent.clientY; onScale(delta * 0.012); };
+  const end = (event: ThreeEvent<PointerEvent>) => { if (!active.current) return; active.current = false; event.stopPropagation(); (event.target as Element).releasePointerCapture(event.pointerId); onDragging(false); document.body.style.cursor = "auto"; };
+  return <group position={position}><mesh onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}><sphereGeometry args={[0.2, 20, 20]} /><meshBasicMaterial color={color} /></mesh></group>;
+}
+
+function ObjectMesh({ object, selected, connectionSource, layerOpacity, thinkerOpen, onSelect, onOpenThinker, onTransform, onDragging }: {
   object: MapObject;
   selected: boolean;
+  connectionSource: boolean;
   layerOpacity: number;
   thinkerOpen: boolean;
   onSelect: (additive: boolean) => void;
@@ -197,33 +207,37 @@ function ObjectMesh({ object, selected, layerOpacity, thinkerOpen, onSelect, onO
   const dragPlane = useRef(new Plane());
   const dragOffset = useRef(new Vector3());
   const dragPoint = useRef(new Vector3());
+  const startClientX = useRef(0);
   const startClientY = useRef(0);
   const startZ = useRef(0);
   const moved = useRef(false);
+  const pending = useRef(false);
   const beginDrag = (event: ThreeEvent<PointerEvent>) => {
     if (event.nativeEvent.ctrlKey || event.nativeEvent.metaKey) return;
-    event.stopPropagation(); onSelect(event.nativeEvent.shiftKey || event.nativeEvent.ctrlKey || event.nativeEvent.metaKey); moved.current = false; dragging.current = true; onDragging(true);
-    startClientY.current = event.nativeEvent.clientY; startZ.current = object.z;
+    event.stopPropagation(); moved.current = false; pending.current = true; startClientX.current = event.nativeEvent.clientX; startClientY.current = event.nativeEvent.clientY; startZ.current = object.z;
     const normal = camera.getWorldDirection(new Vector3());
     dragPlane.current.setFromNormalAndCoplanarPoint(normal, new Vector3(object.x, object.y, object.z));
     event.ray.intersectPlane(dragPlane.current, dragPoint.current);
     dragOffset.current.copy(dragPoint.current).sub(new Vector3(object.x, object.y, object.z));
-    (event.target as Element).setPointerCapture(event.pointerId); document.body.style.cursor = "grabbing";
+    (event.target as Element).setPointerCapture(event.pointerId);
   };
   const moveDrag = (event: ThreeEvent<PointerEvent>) => {
-    if (!dragging.current) return;
-    event.stopPropagation(); moved.current = true;
+    if (!pending.current && !dragging.current) return;
+    const delta = Math.hypot(event.nativeEvent.clientX - startClientX.current, event.nativeEvent.clientY - startClientY.current);
+    if (!dragging.current && delta < 5) return;
+    if (!dragging.current) { dragging.current = true; moved.current = true; onDragging(true); document.body.style.cursor = "grabbing"; }
+    event.stopPropagation();
     if (event.nativeEvent.shiftKey) onTransform({ z: startZ.current + (startClientY.current - event.nativeEvent.clientY) * 0.025 });
     else if (event.ray.intersectPlane(dragPlane.current, dragPoint.current)) onTransform({ x: dragPoint.current.x - dragOffset.current.x, y: dragPoint.current.y - dragOffset.current.y, z: dragPoint.current.z - dragOffset.current.z });
   };
   const endDrag = (event: ThreeEvent<PointerEvent>) => {
-    if (!dragging.current) return;
-    dragging.current = false; onDragging(false); event.stopPropagation();
+    if (!pending.current && !dragging.current) return;
+    pending.current = false; const wasDragging = dragging.current; dragging.current = false; if (wasDragging) onDragging(false); event.stopPropagation();
     (event.target as Element).releasePointerCapture(event.pointerId); document.body.style.cursor = "auto";
   };
   const body = (
     <group ref={group} position={[object.x, object.y, object.z]} scale={[object.scaleX, object.scaleY, object.scaleZ]}>
-      <mesh onClick={(event) => { event.stopPropagation(); onSelect(event.nativeEvent.ctrlKey || event.nativeEvent.metaKey); }} onDoubleClick={(event) => { event.stopPropagation(); if (!moved.current) onOpenThinker(); moved.current = false; }} onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerOver={() => { document.body.style.cursor = "grab"; }} onPointerOut={() => { if (!dragging.current) document.body.style.cursor = "auto"; }} renderOrder={object.opacity * layerOpacity < 1 ? 2 : 0}>
+      <mesh onClick={(event) => { event.stopPropagation(); if (moved.current) { moved.current = false; return; } onSelect(event.nativeEvent.shiftKey); }} onDoubleClick={(event) => { event.stopPropagation(); if (!moved.current) onOpenThinker(); moved.current = false; }} onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerOver={() => { document.body.style.cursor = "grab"; }} onPointerOut={() => { if (!dragging.current) document.body.style.cursor = "auto"; }} renderOrder={object.opacity * layerOpacity < 1 ? 2 : 0}>
         <sphereGeometry args={[object.size, 40, 40]} />
         <meshStandardMaterial
           color={object.color}
@@ -236,15 +250,15 @@ function ObjectMesh({ object, selected, layerOpacity, thinkerOpen, onSelect, onO
           depthWrite={object.opacity * layerOpacity >= 0.92}
         />
       </mesh>
-      {selected && <mesh scale={1.07}><sphereGeometry args={[object.size, 28, 28]} /><meshBasicMaterial color="#fff4d0" wireframe transparent opacity={0.72} /></mesh>}
+      {selected && <mesh scale={1.07}><sphereGeometry args={[object.size, 28, 28]} /><meshBasicMaterial color={connectionSource ? "#76d2f4" : "#fff4d0"} wireframe transparent opacity={0.72} /></mesh>}
       <Html position={[0, object.size + 0.35, 0]} center distanceFactor={12} style={{ pointerEvents: "none" }}>
         <span className={`concept-label${selected ? " selected" : ""}`}>{object.name}</span>
       </Html>
       {thinkerOpen && <ThinkerCard concept={object} onClose={onOpenThinker} />}
     </group>
   );
-
-  return body;
+  const radius = object.size * Math.max(object.scaleX, object.scaleY, object.scaleZ) + 0.72;
+  return <>{body}{selected && <group position={[object.x, object.y, object.z]}><Line points={[[-radius, 0, 0], [radius, 0, 0]]} color="#e47770" lineWidth={1.5} /><Line points={[[0, -radius, 0], [0, radius, 0]]} color="#77c77a" lineWidth={1.5} /><Line points={[[0, 0, -radius], [0, 0, radius]]} color="#72a9e4" lineWidth={1.5} /><ScaleHandle axis="x" position={[radius, 0, 0]} color="#e47770" onScale={(amount) => onTransform({ scaleX: Math.max(0.1, object.scaleX + amount) })} onDragging={onDragging} /><ScaleHandle axis="y" position={[0, radius, 0]} color="#77c77a" onScale={(amount) => onTransform({ scaleY: Math.max(0.1, object.scaleY + amount) })} onDragging={onDragging} /><ScaleHandle axis="z" position={[0, 0, radius]} color="#72a9e4" onScale={(amount) => onTransform({ scaleZ: Math.max(0.1, object.scaleZ + amount) })} onDragging={onDragging} /></group>}</>;
 }
 
 function CameraPreset({ view }: { view: PlaneView }) {
@@ -261,18 +275,28 @@ function CameraPreset({ view }: { view: PlaneView }) {
   return null;
 }
 
-function MappingScene({ objects, connections, layers, axisLabels, selectedId, planeView, thinkerObjectId, onSelect, onConnectSelect, onOpenThinker, onSelectConnection, onChange, onDragging, dragging, editable, onAxisSave }: {
+function ConnectionLabel({ connection, position, selected, onSelect, onSave }: { connection: Connection; position: [number, number, number]; selected: boolean; onSelect: () => void; onSave: (label: string) => void }) {
+  const [editing, setEditing] = useState(false); const [draft, setDraft] = useState(connection.label); const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+  const commit = () => { const label = draft.trim(); if (label && label !== connection.label) onSave(label); setEditing(false); };
+  return <Html position={position} center distanceFactor={13} style={{ pointerEvents: "auto" }}><div className={`connection-label${selected ? " selected" : ""}`} role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); onSelect(); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(); }} onDoubleClick={(event) => { event.stopPropagation(); setDraft(connection.label); setEditing(true); }}>{editing ? <textarea ref={inputRef} value={draft} rows={Math.min(3, Math.max(1, draft.split("\n").length))} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); commit(); } if (event.key === "Escape") { setDraft(connection.label); setEditing(false); } }} /> : connection.label}</div></Html>;
+}
+
+function MappingScene({ objects, connections, layers, axisLabels, selectedId, connectionStartId, selectedConnectionId, planeView, thinkerObjectId, onSelect, onConnectSelect, onOpenThinker, onSelectConnection, onConnectionLabelSave, onChange, onDragging, dragging, editable, onAxisSave }: {
   objects: MapObject[];
   connections: Connection[];
   layers: LayerDefinition[];
   axisLabels: AxisLabels;
   selectedId: string;
+  connectionStartId: string;
+  selectedConnectionId: string;
   planeView: PlaneView;
   thinkerObjectId: string;
   onSelect: (id: string) => void;
-  onConnectSelect: (id: string, additive: boolean) => void;
+  onConnectSelect: (id: string) => void;
   onOpenThinker: (id: string) => void;
   onSelectConnection: (id: string) => void;
+  onConnectionLabelSave: (id: string, label: string) => void;
   onChange: (id: string, patch: Partial<MapObject>) => void;
   onDragging: (dragging: boolean) => void;
   dragging: boolean;
@@ -294,8 +318,8 @@ function MappingScene({ objects, connections, layers, axisLabels, selectedId, pl
     <AxisLabel position={[0, 7.7, 0]} label={`+Y · ${axisLabels.yPositive}`} tone="#8ebc88" editable={editable} onSave={(value) => onAxisSave("yPositive", value.replace(/^\+?Y\s*·\s*/, ""))} />
     <AxisLabel position={[0, 0, -7.7]} label={`−Z · ${axisLabels.zNegative}`} tone="#7ea9d6" editable={editable} onSave={(value) => onAxisSave("zNegative", value.replace(/^−?Z\s*·\s*/, ""))} />
     <AxisLabel position={[0, 0, 7.7]} label={`+Z · ${axisLabels.zPositive}`} tone="#7ea9d6" editable={editable} onSave={(value) => onAxisSave("zPositive", value.replace(/^\+?Z\s*·\s*/, ""))} />
-    {connections.map((connection) => { const source = objects.find((object) => object.id === connection.sourceConceptId); const target = objects.find((object) => object.id === connection.targetConceptId); if (!source || !target || !layers.find((layer) => layer.id === source.layerId)?.visible || !layers.find((layer) => layer.id === target.layerId)?.visible) return null; return <Line key={connection.id} points={[[source.x, source.y, source.z], [target.x, target.y, target.z]]} color={connection.color ?? "#e7d48f"} lineWidth={connection.lineStyle === "dotted" ? 1 : 2} dashed={connection.lineStyle === "dashed" || connection.lineStyle === "dotted"} dashSize={connection.lineStyle === "dotted" ? 0.12 : 0.45} gapSize={connection.lineStyle === "dotted" ? 0.18 : 0.25} transparent opacity={connection.opacity ?? 0.85} onClick={(event) => { event.stopPropagation(); onSelectConnection(connection.id); }} />; })}
-    {objects.map((object) => { const layer = layers.find((item) => item.id === object.layerId); if (layer && !layer.visible) return null; return <ObjectMesh key={object.id} object={object} selected={object.id === selectedId} layerOpacity={layer?.opacity ?? 1} thinkerOpen={thinkerObjectId === object.id} onSelect={(additive) => additive ? onConnectSelect(object.id, true) : onSelect(object.id)} onOpenThinker={() => onOpenThinker(object.id)} onTransform={(patch) => onChange(object.id, patch)} onDragging={onDragging} />; })}
+    {connections.map((connection) => { const source = objects.find((object) => object.id === connection.sourceConceptId); const target = objects.find((object) => object.id === connection.targetConceptId); if (!source || !target || !layers.find((layer) => layer.id === source.layerId)?.visible || !layers.find((layer) => layer.id === target.layerId)?.visible) return null; const selected = connection.id === selectedConnectionId; const midpoint: [number, number, number] = [(source.x + target.x) / 2, (source.y + target.y) / 2, (source.z + target.z) / 2]; return <group key={connection.id}><Line points={[[source.x, source.y, source.z], [target.x, target.y, target.z]]} color={connection.color ?? "#e7d48f"} lineWidth={selected ? 4 : connection.lineStyle === "dotted" ? 1 : 2} dashed={connection.lineStyle === "dashed" || connection.lineStyle === "dotted"} dashSize={connection.lineStyle === "dotted" ? 0.12 : 0.45} gapSize={connection.lineStyle === "dotted" ? 0.18 : 0.25} transparent opacity={selected ? 1 : connection.opacity ?? 0.85} onClick={(event) => { event.stopPropagation(); onSelectConnection(connection.id); }} /><ConnectionLabel connection={connection} position={midpoint} selected={selected} onSelect={() => onSelectConnection(connection.id)} onSave={(label) => onConnectionLabelSave(connection.id, label)} /></group>; })}
+    {objects.map((object) => { const layer = layers.find((item) => item.id === object.layerId); if (layer && !layer.visible) return null; return <ObjectMesh key={object.id} object={object} selected={object.id === selectedId} connectionSource={object.id === connectionStartId} layerOpacity={layer?.opacity ?? 1} thinkerOpen={thinkerObjectId === object.id} onSelect={(additive) => additive ? onConnectSelect(object.id) : onSelect(object.id)} onOpenThinker={() => onOpenThinker(object.id)} onTransform={(patch) => onChange(object.id, patch)} onDragging={onDragging} />; })}
     <OrbitControls makeDefault enabled={!dragging} enableDamping dampingFactor={0.08} minDistance={7} maxDistance={32} target={[0, 0, 0]} />
   </>;
 }
@@ -363,7 +387,7 @@ export function CognitiveMap() {
     if (activeView.readOnly) return;
     editView((view) => ({ ...view, connections: view.connections.map((connection) => connection.id === id ? { ...connection, ...patch, updatedAt: new Date().toISOString() } : connection) }));
   };
-  const selectForConnection = (id: string, additive = false) => {
+  const selectForConnection = (id: string) => {
     if (activeView.readOnly) return;
     if (!connectionStartId) { setConnectionStartId(id); setSelectedId(id); return; }
     if (connectionStartId === id) { setConnectionStartId(""); setSelectedId(""); return; }
@@ -372,7 +396,11 @@ export function CognitiveMap() {
     const now = new Date().toISOString();
     const connection: Connection = { id: crypto.randomUUID(), sourceConceptId: connectionStartId, targetConceptId: id, relationType: "similarity", label: `${source?.name ?? "Concept"} ↔ ${target?.name ?? "Concept"}`, description: "", dimensions: [{ id: crypto.randomUUID(), label: defaultDimensions[0], relation: "unknown" }], lineStyle: "solid", color: "#e7d48f", opacity: 0.85, createdAt: now, updatedAt: now };
     editView((view) => ({ ...view, connections: [...view.connections, connection] }));
-    setSelectedConnectionId(connection.id); setConnectionStartId(additive ? id : ""); setSelectedId(additive ? id : "");
+    setSelectedConnectionId(connection.id); setConnectionStartId(""); setSelectedId("");
+  };
+  const deleteSelectedConnection = () => {
+    if (!selectedConnectionId || activeView.readOnly) return;
+    editView((view) => ({ ...view, connections: view.connections.filter((connection) => connection.id !== selectedConnectionId) })); setSelectedConnectionId("");
   };
   const updateLayer = (id: string, patch: Partial<LayerDefinition>) => {
     if (activeView.readOnly) return;
@@ -401,6 +429,16 @@ export function CognitiveMap() {
     });
     return () => { cancelled = true; };
   }, [roomId]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+      if (event.key === "Escape") { setConnectionStartId(""); return; }
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedConnectionId) { event.preventDefault(); deleteSelectedConnection(); }
+    };
+    window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown);
+  });
 
   useEffect(() => {
     if (!supabase) return;
@@ -499,10 +537,10 @@ export function CognitiveMap() {
     <nav className="viewbar" aria-label="Researcher views"><span className="eyebrow">Views</span><div className="viewtabs">{views.map((view) => <button key={view.id} className={view.id === activeViewId ? "active" : ""} onClick={() => { setActiveViewId(view.id); setSelectedId(""); }}>{view.name}{view.readOnly && <small> read only</small>}</button>)}<button className="add-view" onClick={newView}>+</button></div><div className="view-actions"><button onClick={undo} disabled={!undoStack.length || activeView.readOnly} title="Undo (Ctrl+Z)">↶ Undo</button><button onClick={renameView} disabled={activeView.readOnly}>Rename</button><button onClick={duplicateView}>Duplicate</button><button onClick={() => void saveViews()}>{saved ? "Saved" : "Save"}</button><button onClick={exportView}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={deleteView}>Delete</button><input ref={importRef} hidden type="file" accept="application/json" onChange={(e) => void importView(e.target.files?.[0])} /></div></nav>
     <section className="workspace">
       <div className="viewport" aria-label="Interactive three-dimensional concept map">
-        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName} · {collaborators} online</span><div className="viewport-tools"><div className="interaction-key"><b>Drag</b> Move <span>·</span> <b>Shift + drag</b> depth <span>·</span> <b>Ctrl/Cmd + click × 2</b> Connect</div><div className="tool-toggle plane-toggle" aria-label="Camera view"><button className={planeView === "3d" ? "active" : ""} onClick={() => setPlaneView("3d")}>3D</button><button className={planeView === "xy" ? "active" : ""} onClick={() => setPlaneView("xy")}>XY</button><button className={planeView === "yz" ? "active" : ""} onClick={() => setPlaneView("yz")}>YZ</button><button className={planeView === "xz" ? "active" : ""} onClick={() => setPlaneView("xz")}>XZ</button></div></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
-        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => { setSelectedId(""); setConnectionStartId(""); }}><MappingScene objects={objects} connections={connections} layers={layers} axisLabels={activeView.axisLabels} selectedId={activeView.readOnly ? "" : selectedId} planeView={planeView} thinkerObjectId={thinkerObjectId} onSelect={setSelectedId} onConnectSelect={selectForConnection} onOpenThinker={(id) => setThinkerObjectId((current) => current === id ? "" : id)} onSelectConnection={(id) => { setSelectedConnectionId(id); }} onChange={update} onDragging={setDraggingObject} dragging={draggingObject} editable={!activeView.readOnly} onAxisSave={(axis, value) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [axis]: value } }))} /></Canvas>
+        <div className="viewport-meta"><span className="eyebrow">Viewing: {activeView.ownerName} · {collaborators} online</span><div className="viewport-tools"><div className="interaction-key"><b>Drag</b> Move <span>·</span> <b>Shift + drag</b> depth <span>·</span> <b>Drag handles</b> Shape <span>·</span> <b>Shift + click × 2</b> Connect</div><div className="tool-toggle plane-toggle" aria-label="Camera view"><button className={planeView === "3d" ? "active" : ""} onClick={() => setPlaneView("3d")}>3D</button><button className={planeView === "xy" ? "active" : ""} onClick={() => setPlaneView("xy")}>XY</button><button className={planeView === "yz" ? "active" : ""} onClick={() => setPlaneView("yz")}>YZ</button><button className={planeView === "xz" ? "active" : ""} onClick={() => setPlaneView("xz")}>XZ</button></div></div><span className="object-count">{activeView.readOnly ? "Read Only · " : "Edit Mode · "}{objects.length} objects</span></div>
+        <Canvas dpr={[1, 1.75]} gl={{ antialias: true, alpha: false }} onPointerMissed={() => { setSelectedId(""); setConnectionStartId(""); }}><MappingScene objects={objects} connections={connections} layers={layers} axisLabels={activeView.axisLabels} selectedId={activeView.readOnly ? "" : selectedId} connectionStartId={connectionStartId} selectedConnectionId={selectedConnectionId} planeView={planeView} thinkerObjectId={thinkerObjectId} onSelect={setSelectedId} onConnectSelect={selectForConnection} onOpenThinker={(id) => setThinkerObjectId((current) => current === id ? "" : id)} onSelectConnection={(id) => { setSelectedConnectionId(id); }} onConnectionLabelSave={(id, label) => updateConnection(id, { label })} onChange={update} onDragging={setDraggingObject} dragging={draggingObject} editable={!activeView.readOnly} onAxisSave={(axis, value) => editView((view) => ({ ...view, axisLabels: { ...view.axisLabels, [axis]: value } }))} /></Canvas>
         <div className="layer-panel"><div><b>Layers</b><button disabled={activeView.readOnly} onClick={addLayer}>+ Add</button></div>{[...layers].sort((a, b) => a.order - b.order).map((layer) => <details key={layer.id}><summary><input type="checkbox" checked={layer.visible} disabled={activeView.readOnly} onChange={(e) => updateLayer(layer.id, { visible: e.target.checked })} onClick={(e) => e.stopPropagation()} /> {layer.name}</summary><label>Name<input disabled={activeView.readOnly} value={layer.name} onChange={(e) => updateLayer(layer.id, { name: e.target.value })} /></label><label>Description<input disabled={activeView.readOnly} value={layer.description ?? ""} onChange={(e) => updateLayer(layer.id, { description: e.target.value })} /></label><label>Opacity <input type="range" min="0.05" max="1" step="0.05" disabled={activeView.readOnly} value={layer.opacity ?? 1} onChange={(e) => updateLayer(layer.id, { opacity: Number(e.target.value) })} /></label><button disabled={activeView.readOnly || layers.length < 2} className="danger" onClick={() => removeLayer(layer.id)}>Delete layer</button></details>)}</div>
-        <div className="control-hint">{connectionStartId ? <span><b>Connect:</b> Ctrl/Cmd + click a second sphere</span> : <><span><b>Drag sphere</b> screen plane</span><span><b>Shift + drag</b> depth (Z)</span><span><b>Drag space</b> rotate</span></>}</div>
+        <div className="control-hint">{connectionStartId ? <span><b>Connect:</b> Shift + click a second sphere · Esc to cancel</span> : <><span><b>Drag sphere</b> screen plane</span><span><b>Shift + drag</b> depth (Z)</span><span><b>Double click</b> details</span></>}</div>
       </div>
       <aside className="inspector">
         <div className="inspector-head"><span className="eyebrow">Object editor</span><span className="phase-badge">{activeView.readOnly ? "Read only" : "Edit mode"}</span></div>
